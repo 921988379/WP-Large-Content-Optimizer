@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.1 - 2026-05-26
+
+### Changed
+
+- 优化中文文案：统一使用更易理解的“失效 postmeta / 失效分类关系”。
+- 底层清理逻辑不变，仅调整后台展示文案和文档。
+
 ## 2.4.0 - 2026-05-26
 
 ### Added
@@ -136,7 +143,7 @@
 
 - 初始版本。
 - 数据库体检。
-- 分批清理 revision、auto-draft、trash、孤儿 postmeta、孤儿分类关系、过期 transient。
+- 分批清理 revision、auto-draft、trash、失效 postmeta、失效分类关系、过期 transient。
 - 推荐索引检测与添加。
 - 后台文章/页面列表轻量化。
 - 修订版本限制。

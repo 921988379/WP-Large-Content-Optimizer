@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.4.0
+Stable tag: 2.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -25,7 +25,7 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 数据表大小 TOP
 * postmeta 热点字段 TOP
 * autoload 大对象分析
-* 分批清理 revision、auto-draft、trash、孤儿 postmeta、孤儿分类关系、过期 transient
+* 分批清理 revision、auto-draft、trash、失效 postmeta、失效分类关系、过期 transient
 * 推荐数据库索引检测与手动添加
 * 后台文章列表轻量化
 * 后台大列表快速模式
@@ -79,6 +79,9 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 支持，可在插件页面顶部点击“导出 JSON 诊断报告”。
 
 == Changelog ==
+
+= 2.4.1 =
+* 优化中文文案：统一使用“失效”表述，更适合站长理解。
 
 = 2.4.0 =
 * 新增后台 AJAX 队列清理与进度条。

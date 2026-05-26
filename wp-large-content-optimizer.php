@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速和定时维护。
- * Version: 2.4.0
+ * Version: 2.4.1
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.4.0';
+    const VERSION = '2.4.1';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const GITHUB_OWNER = '921988379';
@@ -427,8 +427,8 @@ final class WP_Large_Content_Optimizer {
             'revisions' => '修订版本',
             'autodrafts' => '自动草稿',
             'trash' => '回收站文章',
-            'orphan_postmeta' => '孤儿 postmeta',
-            'orphan_terms' => '孤儿分类关系',
+            'orphan_postmeta' => '失效 postmeta',
+            'orphan_terms' => '失效分类关系',
             'expired_transients' => '过期 transient',
             'failed_drafts' => '采集失败草稿',
             'duplicate_drafts' => '重复草稿',
@@ -618,8 +618,8 @@ final class WP_Large_Content_Optimizer {
                     <?php $this->action_button('clean_revisions', '清理修订版本', '清理本批次 revision？'); ?>
                     <?php $this->action_button('clean_autodrafts', '清理自动草稿', '清理本批次 auto-draft？'); ?>
                     <?php $this->action_button('clean_trash', '清理回收站文章', '清理本批次回收站内容？'); ?>
-                    <?php $this->action_button('clean_orphan_postmeta', '清理孤儿 postmeta', '清理没有对应文章的 postmeta？'); ?>
-                    <?php $this->action_button('clean_orphan_term_relationships', '清理孤儿分类关系', '清理没有对应文章的 term relationships？'); ?>
+                    <?php $this->action_button('clean_orphan_postmeta', '清理失效 postmeta', '清理文章已不存在但仍残留的 postmeta？'); ?>
+                    <?php $this->action_button('clean_orphan_term_relationships', '清理失效分类关系', '清理文章已不存在但仍残留的分类关系？'); ?>
                     <?php $this->action_button('clean_expired_transients', '清理过期 transient', '清理过期 transient 缓存？'); ?>
                     <div class="wplco-queue" data-wplco-queue>
                         <h3>队列清理</h3>
@@ -628,8 +628,8 @@ final class WP_Large_Content_Optimizer {
                             <label><input type="checkbox" value="revisions" checked> 修订版本</label>
                             <label><input type="checkbox" value="autodrafts" checked> 自动草稿</label>
                             <label><input type="checkbox" value="trash"> 回收站文章</label>
-                            <label><input type="checkbox" value="orphan_postmeta" checked> 孤儿 postmeta</label>
-                            <label><input type="checkbox" value="orphan_terms" checked> 孤儿分类关系</label>
+                            <label><input type="checkbox" value="orphan_postmeta" checked> 失效 postmeta</label>
+                            <label><input type="checkbox" value="orphan_terms" checked> 失效分类关系</label>
                             <label><input type="checkbox" value="expired_transients" checked> 过期 transient</label>
                             <label><input type="checkbox" value="failed_drafts"> 采集失败草稿</label>
                             <label><input type="checkbox" value="duplicate_drafts"> 重复草稿</label>
@@ -943,7 +943,7 @@ final class WP_Large_Content_Optimizer {
                     <label><input type="checkbox" name="cron_clean_revisions" value="1" <?php checked($settings['cron_clean_revisions']); ?>> 自动清理修订版本</label>
                     <label><input type="checkbox" name="cron_clean_autodrafts" value="1" <?php checked($settings['cron_clean_autodrafts']); ?>> 自动清理自动草稿</label>
                     <label><input type="checkbox" name="cron_clean_trash" value="1" <?php checked($settings['cron_clean_trash']); ?>> 自动清理回收站文章</label>
-                    <label><input type="checkbox" name="cron_clean_orphan_postmeta" value="1" <?php checked($settings['cron_clean_orphan_postmeta']); ?>> 自动清理孤儿 postmeta</label>
+                    <label><input type="checkbox" name="cron_clean_orphan_postmeta" value="1" <?php checked($settings['cron_clean_orphan_postmeta']); ?>> 自动清理失效 postmeta</label>
                     <label><input type="checkbox" name="cron_clean_expired_transients" value="1" <?php checked($settings['cron_clean_expired_transients']); ?>> 自动清理过期 transient</label>
                     <?php submit_button('保存设置'); ?>
                 </form>
@@ -1362,8 +1362,8 @@ final class WP_Large_Content_Optimizer {
         $revisions = $get('修订版本 revision');
         $autodrafts = $get('自动草稿 auto-draft');
         $trash = $get('回收站文章 trash');
-        $orphan_meta = $get('孤儿 postmeta');
-        $orphan_terms = $get('孤儿分类关系');
+        $orphan_meta = $get('失效 postmeta');
+        $orphan_terms = $get('失效分类关系');
         $autoload = $get('autoload options 数量');
         $expired_transients = $get('过期 transient');
         $missing_indexes = 0;
@@ -1389,7 +1389,7 @@ final class WP_Large_Content_Optimizer {
                 $recommendations[] = 'postmeta 与文章比例过高，优先查看“postmeta 热点字段 TOP”，排查采集/SEO/编辑器插件写入过多字段。';
             } elseif ($ratio > 12) {
                 $score -= 10;
-                $recommendations[] = 'postmeta 数量偏多，建议减少无用自定义字段并定期清理孤儿 postmeta。';
+                $recommendations[] = 'postmeta 数量偏多，建议减少无用自定义字段并定期清理失效 postmeta。';
             }
         }
 
@@ -1403,7 +1403,7 @@ final class WP_Large_Content_Optimizer {
         }
         if ($orphan_meta > 0 || $orphan_terms > 0) {
             $score -= 10;
-            $recommendations[] = '存在孤儿数据，建议先备份数据库，再分批清理孤儿 postmeta 和孤儿分类关系。';
+            $recommendations[] = '存在失效数据，建议先备份数据库，再分批清理失效 postmeta 和失效分类关系。';
         }
         if ($autoload > 800) {
             $score -= 8;
@@ -1529,8 +1529,8 @@ final class WP_Large_Content_Optimizer {
         $revisions = $get('修订版本 revision');
         $autodrafts = $get('自动草稿 auto-draft');
         $trash = $get('回收站文章 trash');
-        $orphan_meta = $get('孤儿 postmeta');
-        $orphan_terms = $get('孤儿分类关系');
+        $orphan_meta = $get('失效 postmeta');
+        $orphan_terms = $get('失效分类关系');
         $expired_transients = $get('过期 transient');
         $missing_indexes = 0;
         foreach ($indexes as $idx) {
@@ -1557,7 +1557,7 @@ final class WP_Large_Content_Optimizer {
             $steps[] = array('risk' => 'medium', 'risk_label' => '中风险', 'title' => '限制并清理 revision', 'detail' => 'revision 很多会让 wp_posts 膨胀。清理后无法恢复旧版本内容。', 'action' => '设置每篇保留 0-3 个 revision，再分批清理修订版本。');
         }
         if ($orphan_meta > 0 || $orphan_terms > 0) {
-            $steps[] = array('risk' => 'medium', 'risk_label' => '中风险', 'title' => '清理孤儿数据', 'detail' => '孤儿 postmeta/分类关系没有对应文章，通常是删除文章或插件遗留。', 'action' => '备份后分批清理孤儿 postmeta 和孤儿分类关系。');
+            $steps[] = array('risk' => 'medium', 'risk_label' => '中风险', 'title' => '清理失效数据', 'detail' => '失效 postmeta/分类关系没有对应文章，通常是删除文章或插件遗留。', 'action' => '备份后分批清理失效 postmeta 和失效分类关系。');
         }
         if ($postmeta > 0 && $posts > 0 && ($postmeta / max(1, $posts)) > 12) {
             $steps[] = array('risk' => 'medium', 'risk_label' => '中风险', 'title' => '排查 postmeta 热点字段', 'detail' => 'postmeta 比例过高是大文章站后台慢的常见原因。不要直接删除，先确认字段来源。', 'action' => '查看“postmeta 热点字段 TOP”，定位采集/SEO/编辑器插件产生的字段。');
@@ -1634,8 +1634,8 @@ final class WP_Large_Content_Optimizer {
             '自动草稿 auto-draft' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$posts} WHERE post_status=%s", 'auto-draft'))),
             '回收站文章 trash' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$posts} WHERE post_status=%s", 'trash'))),
             'postmeta 总数' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$postmeta}")),
-            '孤儿 postmeta' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$postmeta} pm LEFT JOIN {$posts} p ON p.ID = pm.post_id WHERE p.ID IS NULL")),
-            '孤儿分类关系' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$terms} tr LEFT JOIN {$posts} p ON p.ID = tr.object_id WHERE p.ID IS NULL")),
+            '失效 postmeta' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$postmeta} pm LEFT JOIN {$posts} p ON p.ID = pm.post_id WHERE p.ID IS NULL")),
+            '失效分类关系' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$terms} tr LEFT JOIN {$posts} p ON p.ID = tr.object_id WHERE p.ID IS NULL")),
             'autoload options 数量' => intval($wpdb->get_var("SELECT COUNT(*) FROM {$options} WHERE autoload IN ('yes','on','auto-on','auto')")),
             '过期 transient' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$options} WHERE option_name LIKE %s AND option_value < %d", $wpdb->esc_like('_transient_timeout_') . '%', time()))),
         );
@@ -1646,7 +1646,7 @@ final class WP_Large_Content_Optimizer {
             if ($value > 100000) {
                 $class = 'wplco-warn';
             }
-            if (in_array($label, array('修订版本 revision', '自动草稿 auto-draft', '回收站文章 trash', '孤儿 postmeta', '孤儿分类关系', '过期 transient'), true) && $value > 0) {
+            if (in_array($label, array('修订版本 revision', '自动草稿 auto-draft', '回收站文章 trash', '失效 postmeta', '失效分类关系', '过期 transient'), true) && $value > 0) {
                 $class = 'wplco-danger';
             }
             $out[$label] = array('value' => $value, 'class' => $class);
@@ -1818,14 +1818,14 @@ final class WP_Large_Content_Optimizer {
         global $wpdb;
         $limit = $this->batch_size();
         $rows = $wpdb->query($wpdb->prepare("DELETE pm FROM {$wpdb->postmeta} pm LEFT JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE p.ID IS NULL LIMIT %d", $limit));
-        return array('type' => 'success', 'message' => '已清理孤儿 postmeta：' . number_format_i18n(max(0, intval($rows))) . ' 条。');
+        return array('type' => 'success', 'message' => '已清理失效 postmeta：' . number_format_i18n(max(0, intval($rows))) . ' 条。');
     }
 
     private function clean_orphan_term_relationships() {
         global $wpdb;
         $limit = $this->batch_size();
         $rows = $wpdb->query($wpdb->prepare("DELETE tr FROM {$wpdb->term_relationships} tr LEFT JOIN {$wpdb->posts} p ON p.ID = tr.object_id WHERE p.ID IS NULL LIMIT %d", $limit));
-        return array('type' => 'success', 'message' => '已清理孤儿分类关系：' . number_format_i18n(max(0, intval($rows))) . ' 条。');
+        return array('type' => 'success', 'message' => '已清理失效分类关系：' . number_format_i18n(max(0, intval($rows))) . ' 条。');
     }
 
     private function clean_expired_transients() {
