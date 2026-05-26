@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 3.0.0
+Stable tag: 3.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -43,6 +43,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 轻量页面缓存（默认关闭）
 * Redis/Object Cache 深度检测
 * REST/XML-RPC/feed 轻量控制
+* 趋势记录清空工具
+* 后台列表筛选器精简模式
+* 慢查询 EXPLAIN 采样
+* 高级缓存 Drop-in 安全安装/卸载
 * WooCommerce/Action Scheduler 检测
 * 性能趋势记录
 * 媒体库只读体检
@@ -86,6 +90,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 3.1.0 的高级缓存 Drop-in 会不会覆盖现有缓存？ =
+
+不会。如果已存在第三方 `advanced-cache.php`，插件会拒绝覆盖。卸载时也只删除带 WLCO 标识的 drop-in。高级缓存默认不安装，需要管理员手动确认；并且仍需 `WP_CACHE=true` 才会生效。
 
 = 3.0.0 补齐了哪些剩余优化？ =
 

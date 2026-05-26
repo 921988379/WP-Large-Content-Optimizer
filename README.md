@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.0.0`
+`3.1.0`
 
 ## 后台入口
 
@@ -39,11 +39,28 @@ https://www.seoyh.net
 - Redis/Object Cache 深度检测
 - REST/XML-RPC/feed 轻量控制
 - WooCommerce/Action Scheduler 检测
+- 趋势记录清空工具
+- 后台列表筛选器精简模式
+- 慢查询 EXPLAIN 采样
+- 高级缓存 Drop-in 安全安装/卸载
 - 插件/主题体检
 - 性能趋势记录
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.1.0 高级治理
+
+3.1.0 继续补齐高收益但需要谨慎启用的优化：
+
+- 高级缓存 Drop-in 管理：可安装/卸载 WLCO 自有 `advanced-cache.php`，不会覆盖或删除第三方 drop-in
+- WLCO drop-in 只服务匿名 GET、无查询参数、无登录/评论/电商 Cookie 的缓存页面
+- Drop-in 固定 1 小时保守过期，并依赖插件原有发布/评论变更自动清空缓存
+- 慢查询 EXPLAIN 采样：对固定安全 SELECT 样本执行 EXPLAIN，辅助判断索引使用情况
+- 后台列表筛选器精简模式：减少日期/分类/作者等重筛选器误触造成的重查询
+- 性能趋势记录新增清空工具
+
+注意：安装 `advanced-cache.php` 后仍需自行确认 `wp-config.php` 中 `WP_CACHE` 为 true；如果已有 Nginx FastCGI Cache、LiteSpeed Cache、WP Rocket、Cloudflare APO 等页面缓存，不建议叠加启用。
 
 ## 3.0.0 综合治理
 

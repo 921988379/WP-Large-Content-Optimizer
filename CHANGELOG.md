@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.1.0 - 2026-05-26
+
+### Added
+
+- 新增高级缓存 Drop-in 管理，可安装/卸载 WLCO 自有 `advanced-cache.php`。
+- 新增 Drop-in 来源识别：第三方 `advanced-cache.php` 不覆盖、不删除。
+- 新增慢查询 EXPLAIN 采样，对固定安全 SELECT 样本展示 type/key/rows 风险。
+- 新增后台列表筛选器精简模式，降低日期、分类、作者等重筛选器误触概率。
+- 新增性能趋势记录清空工具。
+
+### Safety
+
+- 高级缓存仍默认不安装，必须管理员手动确认。
+- WLCO drop-in 只服务匿名 GET、无查询参数、无敏感 Cookie 的缓存页面。
+- 不自动修改 `wp-config.php`，不强制开启 `WP_CACHE`。
+- EXPLAIN 采样只读，不执行写操作。
+
 ## 3.0.0 - 2026-05-26
 
 ### Added

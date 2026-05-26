@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.0.0
+ * Version: 3.1.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.0.0';
+    const VERSION = '3.1.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -49,6 +49,7 @@ final class WP_Large_Content_Optimizer {
         add_filter('manage_pages_columns', array($this, 'simplify_post_columns'), 999);
         add_action('pre_get_posts', array($this, 'admin_list_fast_mode_query'), 20);
         add_action('admin_footer-edit.php', array($this, 'render_admin_lazy_stats_script'));
+        add_action('admin_head-edit.php', array($this, 'admin_filter_slim_css'));
         add_filter('months_dropdown_results', array($this, 'admin_list_disable_months_dropdown'), 20, 2);
         add_filter('found_posts', array($this, 'admin_list_disable_found_posts'), 20, 2);
         add_filter('posts_pre_query', array($this, 'admin_query_cache_pre'), 10, 2);
@@ -111,6 +112,7 @@ final class WP_Large_Content_Optimizer {
             'admin_ajax_months' => 0,
             'admin_ajax_found_rows' => 0,
             'admin_stats_cache_ttl' => 600,
+            'admin_filter_slim' => 0,
             'frontend_disable_emoji' => 1,
             'frontend_disable_embeds' => 0,
             'frontend_disable_dashicons' => 0,
@@ -580,6 +582,13 @@ final class WP_Large_Content_Optimizer {
             $result = $this->disable_autoload_option();
         } elseif ($action === 'restore_autoload_option') {
             $result = $this->restore_autoload_option();
+        } elseif ($action === 'install_advanced_cache') {
+            $result = $this->install_advanced_cache_dropin();
+        } elseif ($action === 'uninstall_advanced_cache') {
+            $result = $this->uninstall_advanced_cache_dropin();
+        } elseif ($action === 'clear_trend_history') {
+            delete_option('wplco_trend_history');
+            $result = array('type' => 'success', 'message' => '性能趋势记录已清空。');
         }
 
         if (is_array($result)) {
@@ -612,6 +621,7 @@ final class WP_Large_Content_Optimizer {
         $settings['admin_ajax_months'] = empty($_POST['admin_ajax_months']) ? 0 : 1;
         $settings['admin_ajax_found_rows'] = empty($_POST['admin_ajax_found_rows']) ? 0 : 1;
         $settings['admin_stats_cache_ttl'] = min(3600, max(60, intval($_POST['admin_stats_cache_ttl'] ?? 600)));
+        $settings['admin_filter_slim'] = empty($_POST['admin_filter_slim']) ? 0 : 1;
         $settings['frontend_disable_emoji'] = empty($_POST['frontend_disable_emoji']) ? 0 : 1;
         $settings['frontend_disable_embeds'] = empty($_POST['frontend_disable_embeds']) ? 0 : 1;
         $settings['frontend_disable_dashicons'] = empty($_POST['frontend_disable_dashicons']) ? 0 : 1;
@@ -884,6 +894,23 @@ final class WP_Large_Content_Optimizer {
     }
 
 
+    public function admin_filter_slim_css() {
+        $settings = $this->settings();
+        if (empty($settings['admin_filter_slim']) || !$this->is_admin_edit_posts_screen()) {
+            return;
+        }
+        ?>
+        <style>
+            .tablenav.top .alignleft.actions select[name="m"],
+            .tablenav.top .alignleft.actions select[name="cat"],
+            .tablenav.top .alignleft.actions select[name="author"],
+            .tablenav.top .alignleft.actions select[name="seo_filter"],
+            .tablenav.top .alignleft.actions select[name="readability_filter"]{max-width:1px!important;width:1px!important;min-width:1px!important;opacity:.2!important}
+            .tablenav.top .alignleft.actions:after{content:' WLCO 已精简重筛选器入口，可在「工具 → 大站优化 → 设置」关闭';display:inline-block;margin-left:8px;color:#667085;font-size:12px;vertical-align:middle}
+        </style>
+        <?php
+    }
+
     private function batch_size() {
         $settings = $this->settings();
         return min(5000, max(50, intval($settings['batch_size'])));
@@ -920,6 +947,8 @@ final class WP_Large_Content_Optimizer {
         $plugin_theme_report = $report['plugin_theme_report'];
         $trend_report = $report['trend_report'];
         $commerce_report = $report['commerce_report'];
+        $explain_report = $report['explain_report'];
+        $admin_filter_report = $report['admin_filter_report'];
         $settings = $this->settings();
         $logs = $this->get_logs();
         $notice = get_transient('wplco_admin_notice_' . get_current_user_id());
@@ -1357,7 +1386,20 @@ final class WP_Large_Content_Optimizer {
                         <div><strong>本插件轻量缓存</strong><br><span class="<?php echo $page_cache_report['enabled'] ? 'wplco-ok' : 'wplco-warn'; ?>"><?php echo esc_html($page_cache_report['enabled'] ? '已开启' : '未开启'); ?></span></div>
                     </div>
                     <?php if (!empty($advanced_cache_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($advanced_cache_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
-                    <p class="wplco-small">高级缓存 drop-in 属于高影响功能，本版只做就绪检查，不自动写入 <code>advanced-cache.php</code>，避免和服务器级缓存冲突。</p>
+                    <p class="wplco-small">高级缓存 drop-in 属于高影响功能，只有当前不存在第三方 <code>advanced-cache.php</code> 时才允许安装 WLCO 自有 drop-in；卸载也只删除 WLCO 自己生成的文件。</p>
+                </div>
+                <div class="wplco-card wplco-actions">
+                    <h2>高级缓存 Drop-in 管理</h2>
+                    <div class="wplco-env">
+                        <div><strong>Drop-in 来源</strong><br><span class="<?php echo esc_attr($advanced_cache_report['owner_class']); ?>"><?php echo esc_html($advanced_cache_report['owner']); ?></span></div>
+                        <div><strong>可安装</strong><br><span class="<?php echo $advanced_cache_report['installable'] ? 'wplco-ok' : 'wplco-warn'; ?>"><?php echo esc_html($advanced_cache_report['installable'] ? '是' : '否'); ?></span></div>
+                        <div><strong>WP_CACHE</strong><br><span class="<?php echo esc_attr($advanced_cache_report['wp_cache_class']); ?>"><?php echo esc_html($advanced_cache_report['wp_cache']); ?></span></div>
+                    </div>
+                    <p class="wplco-small">安装后仍需在 <code>wp-config.php</code> 中启用 <code>define('WP_CACHE', true);</code> 才能被 WordPress 加载。本插件不会自动改 wp-config.php。</p>
+                    <p>
+                        <?php if (!empty($advanced_cache_report['installable'])): ?><?php $this->action_button('install_advanced_cache', '安装 WLCO advanced-cache.php', '将安装 WLCO 自有 advanced-cache.php。若服务器已有页面缓存，请不要安装。确定继续？'); ?><?php endif; ?>
+                        <?php if (!empty($advanced_cache_report['owned'])): ?><?php $this->action_button('uninstall_advanced_cache', '卸载 WLCO advanced-cache.php', '只会删除带 WLCO 标识的 advanced-cache.php，不会删除第三方缓存文件。确定继续？'); ?><?php endif; ?>
+                    </p>
                 </div>
                 <div class="wplco-card">
                     <h2>admin-ajax 诊断</h2>
@@ -1393,6 +1435,17 @@ final class WP_Large_Content_Optimizer {
                     <?php if (!empty($plugin_theme_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($plugin_theme_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
                     <table class="wplco-table"><thead><tr><th>插件</th><th>提示</th></tr></thead><tbody><?php foreach ($plugin_theme_report['notable_plugins'] as $row): ?><tr><td><code><?php echo esc_html($row['plugin']); ?></code></td><td><?php echo esc_html($row['hint']); ?></td></tr><?php endforeach; ?></tbody></table>
                 </div>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
+                <h2>后台筛选器精简</h2>
+                <p class="wplco-small">针对文章列表顶部筛选器很多、误触后触发重查询的问题。当前策略为安全视觉精简：不删除 WordPress 查询能力，只降低重筛选入口的干扰。</p>
+                <div class="wplco-env">
+                    <div><strong>精简模式</strong><br><span class="<?php echo $admin_filter_report['enabled'] ? 'wplco-ok' : 'wplco-warn'; ?>"><?php echo esc_html($admin_filter_report['enabled'] ? '已开启' : '未开启'); ?></span></div>
+                    <div><strong>当前屏幕</strong><br><span><?php echo esc_html($admin_filter_report['screen']); ?></span></div>
+                    <div><strong>策略</strong><br><span><?php echo esc_html($admin_filter_report['mode']); ?></span></div>
+                </div>
+                <ul class="wplco-list"><?php foreach ($admin_filter_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -1447,6 +1500,17 @@ final class WP_Large_Content_Optimizer {
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
+                <h2>慢查询 EXPLAIN 采样</h2>
+                <p class="wplco-small">只对固定的安全 SELECT 样本执行 EXPLAIN，不读取慢查询日志、不执行写操作。用于判断关键查询是否能使用索引。</p>
+                <?php if (!empty($explain_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($explain_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                <table class="wplco-table"><thead><tr><th>样本</th><th>表</th><th>type</th><th>key</th><th>rows</th><th>风险</th></tr></thead><tbody>
+                <?php foreach ($explain_report['samples'] as $row): ?>
+                    <tr><td><?php echo esc_html($row['label']); ?></td><td><code><?php echo esc_html($row['table']); ?></code></td><td><?php echo esc_html($row['type']); ?></td><td><code><?php echo esc_html($row['key']); ?></code></td><td><?php echo esc_html($row['rows']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
+                <?php endforeach; ?>
+                </tbody></table>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
                 <h2>性能趋势记录</h2>
                 <p class="wplco-small">每次刷新诊断时记录关键指标，最多保留最近 30 次。用于观察清理/优化后数据是否真的下降。</p>
                 <table class="wplco-table">
@@ -1462,6 +1526,7 @@ final class WP_Large_Content_Optimizer {
                     </tbody>
                 </table>
                 <?php if (!empty($trend_report['summary'])): ?><p class="wplco-small"><?php echo esc_html($trend_report['summary']); ?></p><?php endif; ?>
+                <p><?php $this->action_button('clear_trend_history', '清空趋势记录', '确定清空性能趋势记录？不会影响数据库内容。'); ?></p>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -1549,13 +1614,13 @@ final class WP_Large_Content_Optimizer {
                 var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
-                    '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
+                    '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
                     'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
-                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
+                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
-                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器','admin-ajax 诊断','媒体库体检','插件/主题体检','WooCommerce/Action Scheduler 检测'];
+                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器','admin-ajax 诊断','媒体库体检','插件/主题体检','WooCommerce/Action Scheduler 检测','慢查询 EXPLAIN 采样'];
                 cards.forEach(function(card){
                     var h2=card.querySelector(':scope > h2');
                     if(!h2 || card.classList.contains('wplco-js-ready')){return;}
@@ -1760,6 +1825,87 @@ final class WP_Large_Content_Optimizer {
             return $result;
         }
         return new WP_Error('wplco_rest_restricted', 'REST API 已限制访客访问。', array('status' => 401));
+    }
+
+    private function advanced_cache_path() {
+        return WP_CONTENT_DIR . '/advanced-cache.php';
+    }
+
+    private function advanced_cache_signature() {
+        return 'WLCO_ADVANCED_CACHE_DROPIN';
+    }
+
+    private function is_wlco_advanced_cache_dropin($file = '') {
+        $file = $file ? $file : $this->advanced_cache_path();
+        if (!is_file($file) || !is_readable($file)) {
+            return false;
+        }
+        $head = file_get_contents($file, false, null, 0, 4096);
+        return is_string($head) && strpos($head, $this->advanced_cache_signature()) !== false;
+    }
+
+    private function advanced_cache_dropin_content() {
+        return <<<'PHP'
+<?php
+/**
+ * WLCO_ADVANCED_CACHE_DROPIN
+ * Generated by WP Large Content Optimizer. Remove from plugin settings only.
+ */
+if (!defined('ABSPATH')) {
+    // WordPress loads this file before plugins. Keep it standalone and conservative.
+}
+if (!empty($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'GET' && empty($_GET)) {
+    $cookie = isset($_SERVER['HTTP_COOKIE']) ? (string) $_SERVER['HTTP_COOKIE'] : '';
+    if ($cookie === '' || !preg_match('/wordpress_logged_in_|wp-postpass_|comment_author_|woocommerce_items_in_cart|wp_woocommerce_session_/i', $cookie)) {
+        $host = isset($_SERVER['HTTP_HOST']) ? preg_replace('/[^A-Za-z0-9\.\-:]/', '', $_SERVER['HTTP_HOST']) : '';
+        $uri = isset($_SERVER['REQUEST_URI']) ? strtok($_SERVER['REQUEST_URI'], '?') : '/';
+        if ($host && $uri && !preg_match('#/(wp-admin|wp-login\.php|wp-json|xmlrpc\.php)#i', $uri)) {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+            $variant = preg_match('/Mobile|Android|iPhone|iPad|Opera Mini|IEMobile/i', isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '') ? 'mobile' : 'desktop';
+            $key = md5($variant . '|' . $scheme . $host . $uri);
+            $base = dirname(__FILE__) . '/wplco-page-cache';
+            $file = $base . '/' . substr($key, 0, 2) . '/' . $key . '.html';
+            if (is_file($file) && is_readable($file) && filemtime($file) >= (time() - 3600)) {
+                header('Content-Type: text/html; charset=UTF-8');
+                header('X-WLCO-Advanced-Cache: HIT');
+                header('Cache-Control: public, max-age=60');
+                readfile($file);
+                exit;
+            }
+        }
+    }
+}
+PHP;
+    }
+
+    private function install_advanced_cache_dropin() {
+        $file = $this->advanced_cache_path();
+        if (file_exists($file) && !$this->is_wlco_advanced_cache_dropin($file)) {
+            return array('type' => 'error', 'message' => '已存在第三方 advanced-cache.php，已拒绝覆盖。');
+        }
+        if (!is_writable(WP_CONTENT_DIR)) {
+            return array('type' => 'error', 'message' => 'wp-content 目录不可写，无法安装 advanced-cache.php。');
+        }
+        $written = file_put_contents($file, $this->advanced_cache_dropin_content(), LOCK_EX);
+        if ($written === false) {
+            return array('type' => 'error', 'message' => '写入 advanced-cache.php 失败。');
+        }
+        @chmod($file, 0644);
+        return array('type' => 'success', 'message' => '已安装 WLCO advanced-cache.php。请确认 wp-config.php 中已设置 WP_CACHE=true，且没有其他页面缓存冲突。');
+    }
+
+    private function uninstall_advanced_cache_dropin() {
+        $file = $this->advanced_cache_path();
+        if (!file_exists($file)) {
+            return array('type' => 'success', 'message' => 'advanced-cache.php 不存在，无需卸载。');
+        }
+        if (!$this->is_wlco_advanced_cache_dropin($file)) {
+            return array('type' => 'error', 'message' => '当前 advanced-cache.php 不是 WLCO 生成，已拒绝删除。');
+        }
+        if (!@unlink($file)) {
+            return array('type' => 'error', 'message' => '删除 advanced-cache.php 失败，请检查文件权限。');
+        }
+        return array('type' => 'success', 'message' => '已卸载 WLCO advanced-cache.php。');
     }
 
     private function page_cache_dir() {
@@ -2464,6 +2610,75 @@ final class WP_Large_Content_Optimizer {
         );
     }
 
+    private function collect_explain_report() {
+        global $wpdb;
+        $samples = array();
+        $queries = array(
+            array('label' => '后台文章列表', 'sql' => "EXPLAIN SELECT ID FROM {$wpdb->posts} WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT 20"),
+            array('label' => 'postmeta 按文章读取', 'sql' => "EXPLAIN SELECT meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id=1 LIMIT 20"),
+            array('label' => '分类关系读取', 'sql' => "EXPLAIN SELECT object_id FROM {$wpdb->term_relationships} WHERE term_taxonomy_id=1 LIMIT 20"),
+            array('label' => 'autoload options', 'sql' => "EXPLAIN SELECT option_name, option_value FROM {$wpdb->options} WHERE autoload IN ('yes','on','auto-on','auto')"),
+        );
+        foreach ($queries as $query) {
+            $rows = $wpdb->get_results($query['sql'], ARRAY_A);
+            if (empty($rows)) {
+                continue;
+            }
+            foreach ($rows as $row) {
+                $type = isset($row['type']) ? $row['type'] : '';
+                $key = isset($row['key']) && $row['key'] !== null ? $row['key'] : '';
+                $examined = isset($row['rows']) ? intval($row['rows']) : 0;
+                $risk = '低';
+                $class = 'wplco-ok';
+                if ($type === 'ALL' && $examined > 10000) {
+                    $risk = '高：全表扫描且预估行数较多';
+                    $class = 'wplco-danger';
+                } elseif ($type === 'ALL' || $examined > 50000) {
+                    $risk = '中：可能扫描较多行';
+                    $class = 'wplco-warn';
+                }
+                $samples[] = array(
+                    'label' => $query['label'],
+                    'table' => isset($row['table']) ? $row['table'] : '',
+                    'type' => $type,
+                    'key' => $key ?: '-',
+                    'rows' => $examined ? number_format_i18n($examined) : '-',
+                    'risk' => $risk,
+                    'class' => $class,
+                );
+            }
+        }
+        $recommendations = array();
+        foreach ($samples as $sample) {
+            if ($sample['class'] === 'wplco-danger') {
+                $recommendations[] = 'EXPLAIN 发现高风险全表扫描：' . $sample['label'] . '。建议检查推荐索引和相关插件查询。';
+                break;
+            }
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = '固定样本 EXPLAIN 未发现明显高风险；真实慢 SQL 仍建议结合 Query Monitor 或 MySQL 慢查询日志。';
+        }
+        return array('samples' => $samples, 'recommendations' => $recommendations);
+    }
+
+    private function collect_admin_filter_report() {
+        $settings = $this->settings();
+        $enabled = !empty($settings['admin_filter_slim']);
+        $recommendations = array();
+        if ($enabled) {
+            $recommendations[] = '已开启精简模式：文章列表顶部日期、分类、作者等重筛选器会被视觉压缩，降低误触重查询概率。';
+            $recommendations[] = '如果管理员仍需要频繁使用这些筛选器，可随时在设置里关闭。';
+        } else {
+            $recommendations[] = '未开启精简模式。文章量很大时，顶部筛选器可能触发月份、分类或作者维度的重查询。';
+        }
+        return array(
+            'enabled' => $enabled,
+            'screen' => 'edit.php 文章/页面列表',
+            'mode' => 'CSS 视觉精简，不改变已有查询参数',
+            'recommendations' => $recommendations,
+        );
+    }
+
     private function collect_ajax_report() {
         global $wp_filter;
         $count_callbacks = function($hook) use ($wp_filter) {
@@ -2531,24 +2746,31 @@ final class WP_Large_Content_Optimizer {
     }
 
     private function collect_advanced_cache_report() {
-        $dropin = WP_CONTENT_DIR . '/advanced-cache.php';
+        $dropin = $this->advanced_cache_path();
         $has_dropin = file_exists($dropin);
+        $owned = $this->is_wlco_advanced_cache_dropin($dropin);
         $wp_cache = defined('WP_CACHE') && WP_CACHE;
         $recommendations = array();
         if (!$wp_cache) {
             $recommendations[] = 'WP_CACHE 未开启；高级页面缓存 drop-in 即使存在也通常不会生效。';
         }
-        if ($has_dropin) {
-            $recommendations[] = '检测到 advanced-cache.php，请确认它来自当前使用的缓存方案，避免多个页面缓存同时接管。';
+        if ($has_dropin && !$owned) {
+            $recommendations[] = '检测到第三方 advanced-cache.php，本插件不会覆盖或删除它。请继续使用现有缓存方案或先人工确认来源。';
+        } elseif ($owned) {
+            $recommendations[] = '当前 advanced-cache.php 由 WLCO 生成，可在本页安全卸载。';
         } else {
-            $recommendations[] = '未检测到 advanced-cache.php。当前本插件仍使用轻量 template_redirect 缓存，安全但不能完全绕过 WP 启动。';
+            $recommendations[] = '未检测到 advanced-cache.php。如没有服务器级页面缓存，可考虑安装 WLCO drop-in；默认不自动安装。';
         }
         $recommendations[] = '如服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、Cloudflare APO 或 WP Rocket，不建议再叠加高级 drop-in。';
         return array(
             'wp_cache' => $wp_cache ? '已开启' : '未开启',
             'wp_cache_class' => $wp_cache ? 'wplco-ok' : 'wplco-warn',
             'dropin' => $has_dropin ? '已存在' : '未发现',
-            'dropin_class' => $has_dropin ? 'wplco-warn' : 'wplco-ok',
+            'dropin_class' => $has_dropin ? ($owned ? 'wplco-ok' : 'wplco-warn') : 'wplco-ok',
+            'owner' => $has_dropin ? ($owned ? 'WLCO' : '第三方/未知') : '无',
+            'owner_class' => $has_dropin ? ($owned ? 'wplco-ok' : 'wplco-warn') : 'wplco-ok',
+            'owned' => $owned,
+            'installable' => !$has_dropin || $owned,
             'recommendations' => $recommendations,
         );
     }
@@ -2614,6 +2836,8 @@ final class WP_Large_Content_Optimizer {
             'plugin_theme_report' => $this->collect_plugin_theme_report(),
             'trend_report' => $this->collect_trend_report($stats),
             'commerce_report' => $this->collect_commerce_report(),
+            'explain_report' => $this->collect_explain_report(),
+            'admin_filter_report' => $this->collect_admin_filter_report(),
         );
         set_transient('wplco_diagnostic_report', $report, 10 * MINUTE_IN_SECONDS);
         return $report;
