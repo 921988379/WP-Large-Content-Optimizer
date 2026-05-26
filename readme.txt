@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.6.0
+Stable tag: 2.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -37,6 +37,7 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 数据库维护日志
 * WP-Cron 与采集任务检测
 * 后台文章列表查询缓存
+* 轻量页面缓存（默认关闭）
 * Redis/Object Cache 深度检测
 * JSON 诊断报告导出
 
@@ -76,6 +77,14 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 页面缓存会默认开启吗？ =
+
+不会。页面缓存默认关闭，需要管理员在设置中手动开启。如果服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、WP Rocket 等页面缓存，建议不要重复开启。
+
+= 页面缓存会缓存哪些页面？ =
+
+可选缓存首页、文章页/页面、分类/标签/归档页。不会缓存登录用户、后台、搜索、预览、REST/AJAX、带查询参数 URL。发布/删除文章或评论状态变化时会自动清空缓存。
 
 = 支持导出报告吗？ =
 
