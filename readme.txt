@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.4.1
+Stable tag: 2.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -35,6 +35,7 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 前台性能与缓存检测
 * 数据库慢查询风险分析
 * 数据库维护日志
+* WP-Cron 与采集任务检测
 * JSON 诊断报告导出
 
 == Safety ==
@@ -79,6 +80,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 支持，可在插件页面顶部点击“导出 JSON 诊断报告”。
 
 == Changelog ==
+
+= 2.5.0 =
+* 新增 WP-Cron 与采集任务检测模块。
+* 支持识别过期、高频、重复、采集相关 cron 事件，并可安全清理完全重复事件。
 
 = 2.4.1 =
 * 优化中文文案：统一使用“失效”表述，更适合站长理解。

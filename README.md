@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`2.4.1`
+`2.5.0`
 
 ## 后台入口
 
@@ -30,6 +30,7 @@ https://www.seoyh.net
 - 数据库维护日志
 - JSON 诊断报告导出
 - 后台 AJAX 队列清理与进度条
+- WP-Cron 与采集任务检测
 
 ## 安全原则
 

@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速和定时维护。
- * Version: 2.4.1
+ * Version: 2.5.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.4.1';
+    const VERSION = '2.5.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const GITHUB_OWNER = '921988379';
@@ -247,6 +247,8 @@ final class WP_Large_Content_Optimizer {
         } elseif ($action === 'clear_logs') {
             delete_option(self::LOG_OPTION);
             $result = array('type' => 'success', 'message' => '维护日志已清空。');
+        } elseif ($action === 'clean_duplicate_cron') {
+            $result = $this->clean_duplicate_cron_events();
         }
 
         if (is_array($result)) {
@@ -551,6 +553,7 @@ final class WP_Large_Content_Optimizer {
         $published_duplicate_groups = $report['published_duplicate_groups'];
         $frontend_report = $report['frontend_report'];
         $slow_risk_report = $report['slow_risk_report'];
+        $cron_report = $report['cron_report'];
         $settings = $this->settings();
         $logs = $this->get_logs();
         $notice = get_transient('wplco_admin_notice_' . get_current_user_id());
@@ -577,6 +580,7 @@ final class WP_Large_Content_Optimizer {
                     <button type="button" class="is-active" data-wplco-tab="overview">概览</button>
                     <button type="button" data-wplco-tab="database">数据库</button>
                     <button type="button" data-wplco-tab="collector">采集站</button>
+                    <button type="button" data-wplco-tab="cron">定时任务</button>
                     <button type="button" data-wplco-tab="frontend">前台优化</button>
                     <button type="button" data-wplco-tab="logs">日志</button>
                     <button type="button" data-wplco-tab="settings">设置</button>
@@ -821,6 +825,39 @@ final class WP_Large_Content_Optimizer {
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
+                <h2>WP-Cron 与采集任务检测</h2>
+                <p class="wplco-small">只读分析 WordPress 定时任务，帮助发现采集站常见的高频、过期、重复 cron 事件。清理按钮只删除完全重复的 cron 事件，每组保留一条。</p>
+                <div class="wplco-env">
+                    <div><strong>总事件数</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($cron_report['total_events'])); ?></span></div>
+                    <div><strong>过期事件</strong><br><span class="wplco-metric <?php echo $cron_report['overdue_events'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['overdue_events'])); ?></span></div>
+                    <div><strong>重复事件</strong><br><span class="wplco-metric <?php echo $cron_report['duplicate_events'] ? 'wplco-danger' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['duplicate_events'])); ?></span></div>
+                    <div><strong>采集相关事件</strong><br><span class="wplco-metric <?php echo $cron_report['collector_events'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['collector_events'])); ?></span></div>
+                </div>
+                <?php if (!empty($cron_report['recommendations'])): ?>
+                    <h3>建议</h3>
+                    <ul class="wplco-list">
+                        <?php foreach ($cron_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <h3>高频/重复 Hook TOP</h3>
+                <table class="wplco-table">
+                    <thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>风险</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($cron_report['hooks'] as $row): ?>
+                        <tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['next_run']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php if (!empty($cron_report['collector_hooks'])): ?>
+                    <h3>采集相关 Hook</h3>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th></tr></thead><tbody>
+                    <?php foreach ($cron_report['collector_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['next_run']); ?></td></tr><?php endforeach; ?>
+                    </tbody></table>
+                <?php endif; ?>
+                <p><?php $this->action_button('clean_duplicate_cron', '清理重复 Cron 事件', '只会清理完全重复的 cron 事件，每组保留一条。建议先确认没有任务正在运行，确定继续？'); ?></p>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
                 <h2>前台性能与缓存检测</h2>
                 <div class="wplco-env">
                     <?php foreach ($frontend_report['checks'] as $item): ?>
@@ -958,6 +995,7 @@ final class WP_Large_Content_Optimizer {
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
                     '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
+                    'WP-Cron 与采集任务检测':'cron',
                     '前台性能与缓存检测':'frontend','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
@@ -1320,6 +1358,133 @@ final class WP_Large_Content_Optimizer {
     }
 
 
+    private function collect_cron_report() {
+        $cron = _get_cron_array();
+        $now = time();
+        $hooks = array();
+        $signatures = array();
+        $total = 0;
+        $overdue = 0;
+        $duplicates = 0;
+        $collector_events = 0;
+
+        foreach ((array) $cron as $timestamp => $events) {
+            foreach ((array) $events as $hook => $instances) {
+                foreach ((array) $instances as $key => $event) {
+                    $total++;
+                    if (intval($timestamp) < ($now - 300)) {
+                        $overdue++;
+                    }
+                    $schedule = isset($event['schedule']) ? $event['schedule'] : '';
+                    $args = isset($event['args']) ? $event['args'] : array();
+                    $sig = $hook . '|' . $schedule . '|' . md5(wp_json_encode($args));
+                    if (!isset($signatures[$sig])) {
+                        $signatures[$sig] = 0;
+                    }
+                    $signatures[$sig]++;
+                    if (!isset($hooks[$hook])) {
+                        $hooks[$hook] = array('hook' => $hook, 'count' => 0, 'next' => intval($timestamp), 'collector' => false);
+                    }
+                    $hooks[$hook]['count']++;
+                    $hooks[$hook]['next'] = min($hooks[$hook]['next'], intval($timestamp));
+                    if (preg_match('/caiji|collect|crawl|spider|fetch|采集/i', $hook)) {
+                        $hooks[$hook]['collector'] = true;
+                        $collector_events++;
+                    }
+                }
+            }
+        }
+
+        foreach ($signatures as $count) {
+            if ($count > 1) {
+                $duplicates += ($count - 1);
+            }
+        }
+
+        usort($hooks, function($a, $b) {
+            return $b['count'] <=> $a['count'];
+        });
+
+        $hook_rows = array();
+        $collector_rows = array();
+        foreach ($hooks as $row) {
+            $risk = '低';
+            $class = 'wplco-ok';
+            if ($row['count'] >= 20) {
+                $risk = '高：事件数量较多';
+                $class = 'wplco-danger';
+            } elseif ($row['count'] >= 5) {
+                $risk = '中：可能偏多';
+                $class = 'wplco-warn';
+            }
+            $item = array(
+                'hook' => $row['hook'],
+                'count' => intval($row['count']),
+                'next_run' => $row['next'] ? date_i18n('Y-m-d H:i:s', $row['next']) : '-',
+                'risk' => $risk,
+                'class' => $class,
+            );
+            $hook_rows[] = $item;
+            if (!empty($row['collector'])) {
+                $collector_rows[] = $item;
+            }
+        }
+
+        $recommendations = array();
+        if ($overdue > 0) {
+            $recommendations[] = '存在过期未执行的 Cron 事件，可能说明 WP-Cron 触发不稳定，建议检查访问触发或改用服务器计划任务。';
+        }
+        if ($duplicates > 0) {
+            $recommendations[] = '检测到完全重复的 Cron 事件，可使用“清理重复 Cron 事件”每组保留一条。';
+        }
+        if ($collector_events > 0) {
+            $recommendations[] = '检测到采集相关 Cron 事件，请确认采集频率不要过高，建议使用随机延迟或错峰执行。';
+        }
+        if (!(defined('DISABLE_WP_CRON') && DISABLE_WP_CRON)) {
+            $recommendations[] = '当前 WP-Cron 可能仍由访问触发。大站建议设置 DISABLE_WP_CRON，并用服务器 crontab 定时调用 wp-cron.php。';
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = '当前 Cron 任务未发现明显风险。';
+        }
+
+        return array(
+            'total_events' => $total,
+            'overdue_events' => $overdue,
+            'duplicate_events' => $duplicates,
+            'collector_events' => $collector_events,
+            'hooks' => array_slice($hook_rows, 0, 15),
+            'collector_hooks' => array_slice($collector_rows, 0, 10),
+            'recommendations' => array_slice($recommendations, 0, 6),
+        );
+    }
+
+    private function clean_duplicate_cron_events() {
+        $cron = _get_cron_array();
+        $seen = array();
+        $removed = 0;
+        foreach ((array) $cron as $timestamp => $events) {
+            foreach ((array) $events as $hook => $instances) {
+                foreach ((array) $instances as $key => $event) {
+                    $schedule = isset($event['schedule']) ? $event['schedule'] : '';
+                    $args = isset($event['args']) ? $event['args'] : array();
+                    $sig = $hook . '|' . $schedule . '|' . md5(wp_json_encode($args));
+                    if (isset($seen[$sig])) {
+                        wp_unschedule_event(intval($timestamp), $hook, $args);
+                        $removed++;
+                    } else {
+                        $seen[$sig] = true;
+                    }
+                }
+            }
+        }
+        delete_transient('wplco_diagnostic_report');
+        if ($removed <= 0) {
+            return array('type' => 'success', 'message' => '未发现需要清理的重复 Cron 事件。');
+        }
+        return array('type' => 'success', 'message' => '已清理重复 Cron 事件：' . number_format_i18n($removed) . ' 个。');
+    }
+
+
     private function get_diagnostic_report() {
         $cached = get_transient('wplco_diagnostic_report');
         if (is_array($cached)) {
@@ -1343,6 +1508,7 @@ final class WP_Large_Content_Optimizer {
             'published_duplicate_groups' => $this->collect_published_duplicate_groups(),
             'frontend_report' => $this->collect_frontend_report(),
             'slow_risk_report' => $this->collect_slow_risk_report(),
+            'cron_report' => $this->collect_cron_report(),
         );
         set_transient('wplco_diagnostic_report', $report, 10 * MINUTE_IN_SECONDS);
         return $report;
