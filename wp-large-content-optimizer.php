@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速和定时维护。
- * Version: 2.3.0
+ * Version: 2.4.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.3.0';
+    const VERSION = '2.4.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const GITHUB_OWNER = '921988379';
@@ -34,6 +34,8 @@ final class WP_Large_Content_Optimizer {
     private function __construct() {
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('admin_init', array($this, 'handle_post_actions'));
+        add_action('wp_ajax_wplco_queue_start', array($this, 'ajax_queue_start'));
+        add_action('wp_ajax_wplco_queue_step', array($this, 'ajax_queue_step'));
         add_filter('wp_revisions_to_keep', array($this, 'limit_revisions'), 10, 2);
         add_filter('manage_posts_columns', array($this, 'simplify_post_columns'), 999);
         add_filter('manage_pages_columns', array($this, 'simplify_post_columns'), 999);
@@ -420,6 +422,110 @@ final class WP_Large_Content_Optimizer {
     }
 
 
+    private function queue_task_labels() {
+        return array(
+            'revisions' => '修订版本',
+            'autodrafts' => '自动草稿',
+            'trash' => '回收站文章',
+            'orphan_postmeta' => '孤儿 postmeta',
+            'orphan_terms' => '孤儿分类关系',
+            'expired_transients' => '过期 transient',
+            'failed_drafts' => '采集失败草稿',
+            'duplicate_drafts' => '重复草稿',
+        );
+    }
+
+    private function queue_task_count($task) {
+        global $wpdb;
+        switch ($task) {
+            case 'revisions':
+                return intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s", 'revision')));
+            case 'autodrafts':
+                return intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status=%s", 'auto-draft')));
+            case 'trash':
+                return intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_status=%s", 'trash')));
+            case 'orphan_postmeta':
+                return intval($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->postmeta} pm LEFT JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE p.ID IS NULL"));
+            case 'orphan_terms':
+                return intval($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->term_relationships} tr LEFT JOIN {$wpdb->posts} p ON p.ID = tr.object_id WHERE p.ID IS NULL"));
+            case 'expired_transients':
+                return intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d", $wpdb->esc_like('_transient_timeout_') . '%', time())));
+            case 'failed_drafts':
+                return intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s AND post_status IN ('draft','auto-draft','pending') AND (TRIM(post_content) = '' OR post_title = '' OR post_title LIKE %s OR post_content LIKE %s OR post_content LIKE %s)", 'post', '%采集失败%', '%采集失败%', '%failed%')));
+            case 'duplicate_drafts':
+                $rows = $wpdb->get_results($wpdb->prepare("SELECT COUNT(*) AS total FROM {$wpdb->posts} WHERE post_type=%s AND post_status IN ('draft','auto-draft','pending') AND post_title <> '' GROUP BY post_title HAVING total > 1", 'post'), ARRAY_A);
+                $count = 0;
+                foreach ((array) $rows as $row) {
+                    $count += max(0, intval($row['total']) - 1);
+                }
+                return $count;
+        }
+        return 0;
+    }
+
+    private function run_queue_task_batch($task) {
+        switch ($task) {
+            case 'revisions': return $this->clean_revisions();
+            case 'autodrafts': return $this->clean_autodrafts();
+            case 'trash': return $this->clean_trash();
+            case 'orphan_postmeta': return $this->clean_orphan_postmeta();
+            case 'orphan_terms': return $this->clean_orphan_term_relationships();
+            case 'expired_transients': return $this->clean_expired_transients();
+            case 'failed_drafts': return $this->clean_failed_drafts();
+            case 'duplicate_drafts': return $this->trash_duplicate_draft_titles();
+        }
+        return array('type' => 'error', 'message' => '未知队列任务。');
+    }
+
+    public function ajax_queue_start() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => '权限不足。'), 403);
+        }
+        check_ajax_referer('wplco_queue', 'nonce');
+        $labels = $this->queue_task_labels();
+        $requested = isset($_POST['tasks']) && is_array($_POST['tasks']) ? array_map('sanitize_key', wp_unslash($_POST['tasks'])) : array();
+        $tasks = array();
+        foreach ($requested as $task) {
+            if (!isset($labels[$task])) {
+                continue;
+            }
+            $count = $this->queue_task_count($task);
+            $tasks[] = array('key' => $task, 'label' => $labels[$task], 'total' => $count, 'remaining' => $count);
+        }
+        wp_send_json_success(array('tasks' => $tasks, 'batch_size' => $this->batch_size()));
+    }
+
+    public function ajax_queue_step() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => '权限不足。'), 403);
+        }
+        check_ajax_referer('wplco_queue', 'nonce');
+        $labels = $this->queue_task_labels();
+        $task = isset($_POST['task']) ? sanitize_key(wp_unslash($_POST['task'])) : '';
+        if (!isset($labels[$task])) {
+            wp_send_json_error(array('message' => '未知队列任务。'), 400);
+        }
+        $before = $this->queue_task_count($task);
+        $result = $this->run_queue_task_batch($task);
+        $after = $this->queue_task_count($task);
+        $processed = max(0, $before - $after);
+        if (is_array($result)) {
+            $this->add_log('queue_' . $task, $result);
+        }
+        delete_transient('wplco_diagnostic_report');
+        wp_send_json_success(array(
+            'task' => $task,
+            'label' => $labels[$task],
+            'before' => $before,
+            'after' => $after,
+            'processed' => $processed,
+            'done' => $after <= 0 || $processed <= 0,
+            'message' => isset($result['message']) ? $result['message'] : '',
+            'type' => isset($result['type']) ? $result['type'] : 'success',
+        ));
+    }
+
+
     private function batch_size() {
         $settings = $this->settings();
         return min(5000, max(50, intval($settings['batch_size'])));
@@ -482,7 +588,7 @@ final class WP_Large_Content_Optimizer {
             <?php endif; ?>
 
             <style>
-                .wplco-wrap{--wplco-bg:#f6f7fb;--wplco-card:#fff;--wplco-border:#e3e7ef;--wplco-text:#1d2327;--wplco-muted:#667085;--wplco-primary:#2563eb;--wplco-primary-dark:#1d4ed8;--wplco-shadow:0 8px 24px rgba(15,23,42,.06);max-width:1480px}.wplco-wrap *{box-sizing:border-box}.wplco-hero{display:flex;justify-content:space-between;gap:22px;align-items:center;margin:18px 0 14px;padding:24px;border:1px solid #dbe5ff;border-radius:18px;background:linear-gradient(135deg,#eef4ff 0%,#fff 55%,#f8fbff 100%);box-shadow:var(--wplco-shadow)}.wplco-hero h1{margin:0 0 8px;font-size:26px;font-weight:700;color:#0f172a}.wplco-hero p{max-width:900px;margin:0 0 6px;color:#475467;font-size:14px}.wplco-hero-meta{font-size:12px!important;color:#667085!important}.wplco-hero-score{min-width:112px;text-align:center;border-radius:16px;background:#fff;border:1px solid var(--wplco-border);padding:14px 18px;box-shadow:0 4px 14px rgba(15,23,42,.05)}.wplco-hero-score span{display:block;font-size:38px;line-height:1;font-weight:800}.wplco-hero-score small{display:block;margin-top:5px;color:#667085}.wplco-toolbar{position:sticky;top:32px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 16px;padding:10px 12px;border:1px solid var(--wplco-border);border-radius:14px;background:rgba(255,255,255,.92);box-shadow:var(--wplco-shadow);backdrop-filter:blur(8px)}.wplco-toolbar-actions,.wplco-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.wplco-toolbar form,.wplco-actions form{display:inline-block;margin:0}.wplco-toolbar .button,.wplco-actions .button{border-radius:8px}.wplco-nav button{border:0;border-radius:999px;background:#eef2ff;color:#1e40af;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600}.wplco-nav button:hover{background:#dbeafe;color:#1d4ed8}.wplco-nav button.is-active{background:var(--wplco-primary);color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.24)}.wplco-tab-hidden{display:none!important}.wplco-empty-group{display:none!important}.wplco-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px}.wplco-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}.wplco-card{position:relative;background:var(--wplco-card);border:1px solid var(--wplco-border);border-radius:16px;padding:18px;box-shadow:var(--wplco-shadow);overflow:hidden}.wplco-card:hover{border-color:#cbd5e1}.wplco-card h2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-18px -18px 14px;padding:15px 18px;border-bottom:1px solid #edf0f5;background:linear-gradient(180deg,#fff,#fafbff);font-size:16px}.wplco-card h3{color:#1f2937}.wplco-card-body{transition:opacity .16s ease}.wplco-card.is-collapsed .wplco-card-body{display:none}.wplco-toggle{margin-left:auto;border:1px solid #d0d7de;border-radius:8px;background:#fff;color:#475467;font-size:12px;padding:3px 8px;cursor:pointer}.wplco-toggle:hover{background:#f8fafc;color:#1d2327}.wplco-card.is-collapsed .wplco-toggle:after{content:' 展开'}.wplco-card:not(.is-collapsed) .wplco-toggle:after{content:' 收起'}.wplco-stat{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:8px 0}.wplco-stat span{color:#475467}.wplco-stat strong{font-size:16px}.wplco-danger{color:#b42318}.wplco-ok{color:#067647}.wplco-warn{color:#b54708}.wplco-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}.wplco-table th,.wplco-table td{padding:9px 10px;border-bottom:1px solid #eef1f5;text-align:left;vertical-align:top}.wplco-table th{background:#f8fafc;color:#475467;font-weight:600}.wplco-table tr:hover td{background:#fbfdff}.wplco-table code{word-break:break-all}.wplco-small{color:#667085;font-size:12px}.wplco-settings label{display:block;margin:10px 0;padding:8px 10px;border-radius:10px;background:#fbfcff;border:1px solid #eef1f5}.wplco-settings h3{margin-top:18px;padding-top:8px;border-top:1px solid #edf0f5}.wplco-number{width:90px}.wplco-score{font-size:36px;font-weight:800;margin:6px 0}.wplco-pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#f1f5f9;color:#475467;margin-left:6px;font-size:12px}.wplco-list{margin-left:18px;list-style:disc}.wplco-list li{margin-bottom:6px}.wplco-priority{border-left:5px solid #d92d20}.wplco-priority.medium{border-left-color:#f79009}.wplco-priority.low{border-left-color:#12b76a}.wplco-step{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:11px 0;border-bottom:1px solid #eef1f5}.wplco-badge{display:inline-block;text-align:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.wplco-risk-low{background:#ecfdf3;color:#067647}.wplco-risk-medium{background:#fffaeb;color:#b54708}.wplco-risk-high{background:#fef3f2;color:#b42318}.wplco-env{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.wplco-env div{background:#fbfcff;border:1px solid #eef1f5;border-radius:12px;padding:10px}.wplco-metric{font-size:26px;font-weight:800;margin-top:4px}.wplco-actions .button{margin:4px 6px 4px 0}.wplco-card .wplco-card{box-shadow:none;border-radius:12px}.wplco-card .wplco-card h3{margin-top:0}@media (max-width:782px){.wplco-hero,.wplco-toolbar{display:block}.wplco-hero-score{margin-top:14px}.wplco-toolbar{position:static}.wplco-nav{margin-top:10px}.wplco-grid,.wplco-two{grid-template-columns:1fr}.wplco-table{display:block;overflow-x:auto}.wplco-card h2{font-size:15px}.wplco-step{grid-template-columns:1fr}}
+                .wplco-wrap{--wplco-bg:#f6f7fb;--wplco-card:#fff;--wplco-border:#e3e7ef;--wplco-text:#1d2327;--wplco-muted:#667085;--wplco-primary:#2563eb;--wplco-primary-dark:#1d4ed8;--wplco-shadow:0 8px 24px rgba(15,23,42,.06);max-width:1480px}.wplco-wrap *{box-sizing:border-box}.wplco-hero{display:flex;justify-content:space-between;gap:22px;align-items:center;margin:18px 0 14px;padding:24px;border:1px solid #dbe5ff;border-radius:18px;background:linear-gradient(135deg,#eef4ff 0%,#fff 55%,#f8fbff 100%);box-shadow:var(--wplco-shadow)}.wplco-hero h1{margin:0 0 8px;font-size:26px;font-weight:700;color:#0f172a}.wplco-hero p{max-width:900px;margin:0 0 6px;color:#475467;font-size:14px}.wplco-hero-meta{font-size:12px!important;color:#667085!important}.wplco-hero-score{min-width:112px;text-align:center;border-radius:16px;background:#fff;border:1px solid var(--wplco-border);padding:14px 18px;box-shadow:0 4px 14px rgba(15,23,42,.05)}.wplco-hero-score span{display:block;font-size:38px;line-height:1;font-weight:800}.wplco-hero-score small{display:block;margin-top:5px;color:#667085}.wplco-toolbar{position:sticky;top:32px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 16px;padding:10px 12px;border:1px solid var(--wplco-border);border-radius:14px;background:rgba(255,255,255,.92);box-shadow:var(--wplco-shadow);backdrop-filter:blur(8px)}.wplco-toolbar-actions,.wplco-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.wplco-toolbar form,.wplco-actions form{display:inline-block;margin:0}.wplco-toolbar .button,.wplco-actions .button{border-radius:8px}.wplco-nav button{border:0;border-radius:999px;background:#eef2ff;color:#1e40af;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600}.wplco-nav button:hover{background:#dbeafe;color:#1d4ed8}.wplco-nav button.is-active{background:var(--wplco-primary);color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.24)}.wplco-tab-hidden{display:none!important}.wplco-empty-group{display:none!important}.wplco-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px}.wplco-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}.wplco-card{position:relative;background:var(--wplco-card);border:1px solid var(--wplco-border);border-radius:16px;padding:18px;box-shadow:var(--wplco-shadow);overflow:hidden}.wplco-card:hover{border-color:#cbd5e1}.wplco-card h2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-18px -18px 14px;padding:15px 18px;border-bottom:1px solid #edf0f5;background:linear-gradient(180deg,#fff,#fafbff);font-size:16px}.wplco-card h3{color:#1f2937}.wplco-card-body{transition:opacity .16s ease}.wplco-card.is-collapsed .wplco-card-body{display:none}.wplco-toggle{margin-left:auto;border:1px solid #d0d7de;border-radius:8px;background:#fff;color:#475467;font-size:12px;padding:3px 8px;cursor:pointer}.wplco-toggle:hover{background:#f8fafc;color:#1d2327}.wplco-card.is-collapsed .wplco-toggle:after{content:' 展开'}.wplco-card:not(.is-collapsed) .wplco-toggle:after{content:' 收起'}.wplco-stat{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:8px 0}.wplco-stat span{color:#475467}.wplco-stat strong{font-size:16px}.wplco-danger{color:#b42318}.wplco-ok{color:#067647}.wplco-warn{color:#b54708}.wplco-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}.wplco-table th,.wplco-table td{padding:9px 10px;border-bottom:1px solid #eef1f5;text-align:left;vertical-align:top}.wplco-table th{background:#f8fafc;color:#475467;font-weight:600}.wplco-table tr:hover td{background:#fbfdff}.wplco-table code{word-break:break-all}.wplco-small{color:#667085;font-size:12px}.wplco-settings label{display:block;margin:10px 0;padding:8px 10px;border-radius:10px;background:#fbfcff;border:1px solid #eef1f5}.wplco-settings h3{margin-top:18px;padding-top:8px;border-top:1px solid #edf0f5}.wplco-number{width:90px}.wplco-score{font-size:36px;font-weight:800;margin:6px 0}.wplco-pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#f1f5f9;color:#475467;margin-left:6px;font-size:12px}.wplco-list{margin-left:18px;list-style:disc}.wplco-list li{margin-bottom:6px}.wplco-priority{border-left:5px solid #d92d20}.wplco-priority.medium{border-left-color:#f79009}.wplco-priority.low{border-left-color:#12b76a}.wplco-step{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:11px 0;border-bottom:1px solid #eef1f5}.wplco-badge{display:inline-block;text-align:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.wplco-risk-low{background:#ecfdf3;color:#067647}.wplco-risk-medium{background:#fffaeb;color:#b54708}.wplco-risk-high{background:#fef3f2;color:#b42318}.wplco-env{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.wplco-env div{background:#fbfcff;border:1px solid #eef1f5;border-radius:12px;padding:10px}.wplco-metric{font-size:26px;font-weight:800;margin-top:4px}.wplco-actions .button{margin:4px 6px 4px 0}.wplco-queue{margin-top:14px;padding:14px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc}.wplco-queue-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:10px 0}.wplco-queue-options label{padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}.wplco-progress{height:14px;overflow:hidden;border-radius:999px;background:#e5e7eb;margin:10px 0}.wplco-progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#12b76a);transition:width .2s ease}.wplco-queue-log{max-height:160px;overflow:auto;background:#0f172a;color:#d1e7ff;border-radius:10px;padding:10px;font-family:monospace;font-size:12px;white-space:pre-wrap}.wplco-card .wplco-card{box-shadow:none;border-radius:12px}.wplco-card .wplco-card h3{margin-top:0}@media (max-width:782px){.wplco-hero,.wplco-toolbar{display:block}.wplco-hero-score{margin-top:14px}.wplco-toolbar{position:static}.wplco-nav{margin-top:10px}.wplco-grid,.wplco-two{grid-template-columns:1fr}.wplco-table{display:block;overflow-x:auto}.wplco-card h2{font-size:15px}.wplco-step{grid-template-columns:1fr}}
             </style>
 
             <div class="wplco-grid">
@@ -515,6 +621,27 @@ final class WP_Large_Content_Optimizer {
                     <?php $this->action_button('clean_orphan_postmeta', '清理孤儿 postmeta', '清理没有对应文章的 postmeta？'); ?>
                     <?php $this->action_button('clean_orphan_term_relationships', '清理孤儿分类关系', '清理没有对应文章的 term relationships？'); ?>
                     <?php $this->action_button('clean_expired_transients', '清理过期 transient', '清理过期 transient 缓存？'); ?>
+                    <div class="wplco-queue" data-wplco-queue>
+                        <h3>队列清理</h3>
+                        <p class="wplco-small">选择要清理的项目后自动分批执行。每批仍按上方“每批清理数量”处理，可随时暂停。</p>
+                        <div class="wplco-queue-options">
+                            <label><input type="checkbox" value="revisions" checked> 修订版本</label>
+                            <label><input type="checkbox" value="autodrafts" checked> 自动草稿</label>
+                            <label><input type="checkbox" value="trash"> 回收站文章</label>
+                            <label><input type="checkbox" value="orphan_postmeta" checked> 孤儿 postmeta</label>
+                            <label><input type="checkbox" value="orphan_terms" checked> 孤儿分类关系</label>
+                            <label><input type="checkbox" value="expired_transients" checked> 过期 transient</label>
+                            <label><input type="checkbox" value="failed_drafts"> 采集失败草稿</label>
+                            <label><input type="checkbox" value="duplicate_drafts"> 重复草稿</label>
+                        </div>
+                        <p>
+                            <button type="button" class="button button-primary" data-wplco-queue-start>开始队列清理</button>
+                            <button type="button" class="button" data-wplco-queue-pause disabled>暂停</button>
+                        </p>
+                        <div class="wplco-progress" aria-hidden="true"><div class="wplco-progress-bar" data-wplco-queue-bar></div></div>
+                        <p class="wplco-small" data-wplco-queue-status>未开始。</p>
+                        <div class="wplco-queue-log" data-wplco-queue-log>等待开始…</div>
+                    </div>
                 </div>
             </div>
 
@@ -825,6 +952,8 @@ final class WP_Large_Content_Optimizer {
             (function(){
                 var root=document.querySelector('.wplco-wrap');
                 if(!root){return;}
+                var ajaxUrl='<?php echo esc_js(admin_url('admin-ajax.php')); ?>';
+                var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
                     '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
@@ -873,6 +1002,64 @@ final class WP_Large_Content_Optimizer {
                     updateGroupVisibility();
                     try{window.localStorage.setItem('wplco_active_tab',tab);}catch(e){}
                 }
+                var queueBox=root.querySelector('[data-wplco-queue]');
+                if(queueBox){
+                    var startBtn=queueBox.querySelector('[data-wplco-queue-start]');
+                    var pauseBtn=queueBox.querySelector('[data-wplco-queue-pause]');
+                    var bar=queueBox.querySelector('[data-wplco-queue-bar]');
+                    var status=queueBox.querySelector('[data-wplco-queue-status]');
+                    var log=queueBox.querySelector('[data-wplco-queue-log]');
+                    var paused=false,running=false,tasks=[],current=0,totalInitial=0;
+                    function appendLog(text){log.textContent += '\n' + text; log.scrollTop=log.scrollHeight;}
+                    function post(action,data){
+                        var form=new FormData(); form.append('action',action); form.append('nonce',queueNonce);
+                        Object.keys(data||{}).forEach(function(k){
+                            if(Array.isArray(data[k])){data[k].forEach(function(v){form.append(k+'[]',v);});}
+                            else{form.append(k,data[k]);}
+                        });
+                        return fetch(ajaxUrl,{method:'POST',credentials:'same-origin',body:form}).then(function(r){return r.json();});
+                    }
+                    function updateProgress(){
+                        var remaining=tasks.reduce(function(sum,t){return sum+(parseInt(t.remaining,10)||0);},0);
+                        var done=totalInitial>0?Math.max(0,Math.min(100,Math.round((totalInitial-remaining)*100/totalInitial))):100;
+                        bar.style.width=done+'%';
+                        status.textContent='进度：'+done+'% ｜ 剩余约 '+remaining+' 条';
+                    }
+                    function nextStep(){
+                        if(paused||!running){return;}
+                        while(current<tasks.length && parseInt(tasks[current].remaining,10)<=0){current++;}
+                        if(current>=tasks.length){running=false;pauseBtn.disabled=true;startBtn.disabled=false;status.textContent='队列清理完成。';appendLog('✅ 队列清理完成');return;}
+                        var task=tasks[current];
+                        post('wplco_queue_step',{task:task.key}).then(function(res){
+                            if(!res||!res.success){throw new Error((res&&res.data&&res.data.message)||'请求失败');}
+                            task.remaining=parseInt(res.data.after,10)||0;
+                            appendLog('['+res.data.label+'] '+res.data.message+' 剩余：'+task.remaining);
+                            updateProgress();
+                            if(res.data.done){current++;}
+                            window.setTimeout(nextStep,250);
+                        }).catch(function(err){running=false;pauseBtn.disabled=true;startBtn.disabled=false;appendLog('❌ '+err.message);status.textContent='队列中断：'+err.message;});
+                    }
+                    startBtn.addEventListener('click',function(){
+                        if(running){return;}
+                        var selected=Array.prototype.map.call(queueBox.querySelectorAll('.wplco-queue-options input:checked'),function(i){return i.value;});
+                        if(!selected.length){alert('请至少选择一个清理项目。');return;}
+                        if(!confirm('开始队列清理？建议已完成数据库备份。')){return;}
+                        paused=false;running=true;current=0;startBtn.disabled=true;pauseBtn.disabled=false;bar.style.width='0%';log.textContent='正在统计待清理数量…';
+                        post('wplco_queue_start',{tasks:selected}).then(function(res){
+                            if(!res||!res.success){throw new Error((res&&res.data&&res.data.message)||'启动失败');}
+                            tasks=res.data.tasks||[];totalInitial=tasks.reduce(function(sum,t){return sum+(parseInt(t.total,10)||0);},0);
+                            appendLog('批次大小：'+res.data.batch_size);
+                            tasks.forEach(function(t){appendLog('['+t.label+'] 待处理：'+t.total);});
+                            updateProgress(); nextStep();
+                        }).catch(function(err){running=false;pauseBtn.disabled=true;startBtn.disabled=false;appendLog('❌ '+err.message);status.textContent='启动失败：'+err.message;});
+                    });
+                    pauseBtn.addEventListener('click',function(){
+                        paused=!paused; pauseBtn.textContent=paused?'继续':'暂停';
+                        appendLog(paused?'⏸ 已暂停':'▶ 继续执行');
+                        if(!paused){nextStep();}
+                    });
+                }
+
                 root.querySelectorAll('[data-wplco-tab]').forEach(function(btn){
                     btn.addEventListener('click',function(){setTab(btn.getAttribute('data-wplco-tab'));});
                 });

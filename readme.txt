@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.3.0
+Stable tag: 2.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -79,6 +79,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 支持，可在插件页面顶部点击“导出 JSON 诊断报告”。
 
 == Changelog ==
+
+= 2.4.0 =
+* 新增后台 AJAX 队列清理与进度条。
+* 支持选择多个清理项目自动分批执行，可暂停/继续，并写入维护日志。
 
 = 2.3.0 =
 * 新增 GitHub Release 插件内自动更新支持。
