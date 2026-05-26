@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.4.0
+ * Version: 3.5.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.4.0';
+    const VERSION = '3.5.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -985,6 +985,8 @@ final class WP_Large_Content_Optimizer {
         $commerce_report = $report['commerce_report'];
         $explain_report = $report['explain_report'];
         $admin_filter_report = $report['admin_filter_report'];
+        $multisite_report = isset($report['multisite_report']) ? $report['multisite_report'] : array('checks' => array(), 'recommendations' => array());
+        $runtime_profile_report = isset($report['runtime_profile_report']) ? $report['runtime_profile_report'] : array('checks' => array(), 'recommendations' => array());
         $settings = $this->settings();
         $logs = $this->get_logs();
         $notice = get_transient('wplco_admin_notice_' . get_current_user_id());
@@ -1205,6 +1207,27 @@ final class WP_Large_Content_Optimizer {
                             </div>
                         <?php endforeach; ?>
                     </div>
+                </div>
+            </div>
+
+            <div class="wplco-two" style="margin-top:16px">
+                <div class="wplco-card">
+                    <h2>Multisite 兼容检测</h2>
+                    <div class="wplco-env">
+                        <?php foreach ($multisite_report['checks'] as $item): ?>
+                            <div><strong><?php echo esc_html($item['label']); ?></strong><br><span class="<?php echo esc_attr($item['class']); ?>"><?php echo esc_html($item['value']); ?></span><?php if (!empty($item['hint'])): ?><p class="wplco-small" style="margin:4px 0 0"><?php echo esc_html($item['hint']); ?></p><?php endif; ?></div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php if (!empty($multisite_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($multisite_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                </div>
+                <div class="wplco-card">
+                    <h2>诊断页轻量 Profiling</h2>
+                    <div class="wplco-env">
+                        <?php foreach ($runtime_profile_report['checks'] as $item): ?>
+                            <div><strong><?php echo esc_html($item['label']); ?></strong><br><span class="<?php echo esc_attr($item['class']); ?>"><?php echo esc_html($item['value']); ?></span><?php if (!empty($item['hint'])): ?><p class="wplco-small" style="margin:4px 0 0"><?php echo esc_html($item['hint']); ?></p><?php endif; ?></div>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php if (!empty($runtime_profile_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($runtime_profile_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
                 </div>
             </div>
 
@@ -1525,8 +1548,14 @@ final class WP_Large_Content_Optimizer {
                         <div><strong>附件总数</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($media_report['attachments'])); ?></span></div>
                         <div><strong>未挂载附件</strong><br><span class="wplco-metric <?php echo $media_report['unattached'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['unattached'])); ?></span></div>
                         <div><strong>缺少元数据</strong><br><span class="wplco-metric <?php echo $media_report['missing_metadata'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['missing_metadata'])); ?></span></div>
+                        <div><strong>缺少文件路径</strong><br><span class="wplco-metric <?php echo $media_report['missing_file'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['missing_file'])); ?></span></div>
+                        <div><strong>大元数据附件</strong><br><span class="wplco-metric <?php echo $media_report['large_originals'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['large_originals'])); ?></span></div>
                     </div>
                     <?php if (!empty($media_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($media_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    <?php if (!empty($media_report['mime_types'])): ?>
+                        <h3>附件 MIME TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>MIME</th><th>数量</th></tr></thead><tbody><?php foreach ($media_report['mime_types'] as $row): ?><tr><td><code><?php echo esc_html($row['mime']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
                     <?php if (!empty($media_report['samples'])): ?>
                         <h3>待审查附件样本</h3>
                         <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>问题</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><span class="wplco-warn"><?php echo esc_html($row['issue']); ?></span></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
@@ -1611,9 +1640,9 @@ final class WP_Large_Content_Optimizer {
                 <h2>慢查询 EXPLAIN 采样</h2>
                 <p class="wplco-small">只对固定的安全 SELECT 样本执行 EXPLAIN，不读取慢查询日志、不执行写操作。用于判断关键查询是否能使用索引。</p>
                 <?php if (!empty($explain_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($explain_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
-                <table class="wplco-table"><thead><tr><th>样本</th><th>表</th><th>type</th><th>key</th><th>rows</th><th>风险</th></tr></thead><tbody>
+                <table class="wplco-table"><thead><tr><th>样本</th><th>表</th><th>type</th><th>possible_keys</th><th>key</th><th>rows</th><th>Extra</th><th>建议</th><th>风险</th></tr></thead><tbody>
                 <?php foreach ($explain_report['samples'] as $row): ?>
-                    <tr><td><?php echo esc_html($row['label']); ?></td><td><code><?php echo esc_html($row['table']); ?></code></td><td><?php echo esc_html($row['type']); ?></td><td><code><?php echo esc_html($row['key']); ?></code></td><td><?php echo esc_html($row['rows']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
+                    <tr><td><?php echo esc_html($row['label']); ?></td><td><code><?php echo esc_html($row['table']); ?></code></td><td><?php echo esc_html($row['type']); ?></td><td><code><?php echo esc_html($row['possible_keys']); ?></code></td><td><code><?php echo esc_html($row['key']); ?></code></td><td><?php echo esc_html($row['rows']); ?></td><td><?php echo esc_html($row['extra']); ?></td><td><?php echo esc_html($row['advice']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
                 <?php endforeach; ?>
                 </tbody></table>
             </div>
@@ -1731,7 +1760,7 @@ final class WP_Large_Content_Optimizer {
                 var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
-                    '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
+                    'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
                     'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
                     '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
@@ -3176,10 +3205,14 @@ PHP;
         global $wpdb;
         $samples = array();
         $queries = array(
-            array('label' => '后台文章列表', 'sql' => "EXPLAIN SELECT ID FROM {$wpdb->posts} WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT 20"),
-            array('label' => 'postmeta 按文章读取', 'sql' => "EXPLAIN SELECT meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id=1 LIMIT 20"),
-            array('label' => '分类关系读取', 'sql' => "EXPLAIN SELECT object_id FROM {$wpdb->term_relationships} WHERE term_taxonomy_id=1 LIMIT 20"),
-            array('label' => 'autoload options', 'sql' => "EXPLAIN SELECT option_name, option_value FROM {$wpdb->options} WHERE autoload IN ('yes','on','auto-on','auto')"),
+            array('label' => '后台文章列表', 'advice' => '应尽量使用 type_status_date 或类似 post_type/post_status/post_date 索引。', 'sql' => "EXPLAIN SELECT ID FROM {$wpdb->posts} WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT 20"),
+            array('label' => '后台分页偏移', 'advice' => 'OFFSET 很大时仍会扫描/排序较多行，建议后台快速模式限制每页数量。', 'sql' => "EXPLAIN SELECT ID FROM {$wpdb->posts} WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT 1000, 20"),
+            array('label' => 'postmeta 按文章读取', 'advice' => '应使用 post_id 索引；文章详情页和后台编辑页依赖此查询。', 'sql' => "EXPLAIN SELECT meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id=1 LIMIT 20"),
+            array('label' => 'postmeta 按 meta_key 扫描', 'advice' => 'meta_key 数据量大且选择性低时容易慢，避免前台按低选择性字段筛选。', 'sql' => "EXPLAIN SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_thumbnail_id' LIMIT 20"),
+            array('label' => 'postmeta key/value 筛选', 'advice' => 'meta_value 常难以有效索引，采集站应避免复杂 meta_query 作为前台主筛选。', 'sql' => "EXPLAIN SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_thumbnail_id' AND meta_value<>'' LIMIT 20"),
+            array('label' => '分类关系读取', 'advice' => '分类页应使用 term_taxonomy_id 索引，并配合页面缓存。', 'sql' => "EXPLAIN SELECT object_id FROM {$wpdb->term_relationships} WHERE term_taxonomy_id=1 LIMIT 20"),
+            array('label' => 'autoload options', 'advice' => 'autoload 过大时影响所有请求；索引只能减轻查找，关键仍是减少体积。', 'sql' => "EXPLAIN SELECT option_name, option_value FROM {$wpdb->options} WHERE autoload IN ('yes','on','auto-on','auto')"),
+            array('label' => '附件列表', 'advice' => '媒体库很大时后台列表需要对象缓存，并避免无谓筛选。', 'sql' => "EXPLAIN SELECT ID FROM {$wpdb->posts} WHERE post_type='attachment' ORDER BY post_date DESC LIMIT 20"),
         );
         foreach ($queries as $query) {
             $rows = $wpdb->get_results($query['sql'], ARRAY_A);
@@ -3189,22 +3222,27 @@ PHP;
             foreach ($rows as $row) {
                 $type = isset($row['type']) ? $row['type'] : '';
                 $key = isset($row['key']) && $row['key'] !== null ? $row['key'] : '';
+                $possible = isset($row['possible_keys']) && $row['possible_keys'] !== null ? $row['possible_keys'] : '';
+                $extra = isset($row['Extra']) ? $row['Extra'] : '';
                 $examined = isset($row['rows']) ? intval($row['rows']) : 0;
                 $risk = '低';
                 $class = 'wplco-ok';
                 if ($type === 'ALL' && $examined > 10000) {
                     $risk = '高：全表扫描且预估行数较多';
                     $class = 'wplco-danger';
-                } elseif ($type === 'ALL' || $examined > 50000) {
-                    $risk = '中：可能扫描较多行';
+                } elseif ($type === 'ALL' || $examined > 50000 || stripos($extra, 'Using filesort') !== false) {
+                    $risk = '中：可能扫描/排序较多行';
                     $class = 'wplco-warn';
                 }
                 $samples[] = array(
                     'label' => $query['label'],
                     'table' => isset($row['table']) ? $row['table'] : '',
-                    'type' => $type,
+                    'type' => $type ?: '-',
+                    'possible_keys' => $possible ?: '-',
                     'key' => $key ?: '-',
                     'rows' => $examined ? number_format_i18n($examined) : '-',
+                    'extra' => $extra ?: '-',
+                    'advice' => $query['advice'],
                     'risk' => $risk,
                     'class' => $class,
                 );
@@ -3213,14 +3251,20 @@ PHP;
         $recommendations = array();
         foreach ($samples as $sample) {
             if ($sample['class'] === 'wplco-danger') {
-                $recommendations[] = 'EXPLAIN 发现高风险全表扫描：' . $sample['label'] . '。建议检查推荐索引和相关插件查询。';
+                $recommendations[] = 'EXPLAIN 发现高风险全表扫描：' . $sample['label'] . '。建议检查推荐索引、后台快速模式和相关插件查询。';
+                break;
+            }
+        }
+        foreach ($samples as $sample) {
+            if ($sample['class'] === 'wplco-warn' && stripos($sample['extra'], 'Using filesort') !== false) {
+                $recommendations[] = 'EXPLAIN 发现 filesort：' . $sample['label'] . '。数据量大时建议配合页面缓存/对象缓存，后台列表减少深分页。';
                 break;
             }
         }
         if (empty($recommendations)) {
             $recommendations[] = '固定样本 EXPLAIN 未发现明显高风险；真实慢 SQL 仍建议结合 Query Monitor 或 MySQL 慢查询日志。';
         }
-        return array('samples' => $samples, 'recommendations' => $recommendations);
+        return array('samples' => $samples, 'recommendations' => array_slice($recommendations, 0, 6));
     }
 
     private function collect_admin_filter_report() {
@@ -3291,8 +3335,15 @@ PHP;
         $attachments = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s", 'attachment')));
         $unattached = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s AND post_parent=0", 'attachment')));
         $missing_metadata = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND pm.meta_id IS NULL", '_wp_attachment_metadata', 'attachment')));
+        $missing_file = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND pm.meta_id IS NULL", '_wp_attached_file', 'attachment')));
+        $large_originals = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID=pm.post_id WHERE p.post_type=%s AND pm.meta_key=%s AND LENGTH(pm.meta_value) > %d", 'attachment', '_wp_attachment_metadata', 50000)));
+        $mime_rows = $wpdb->get_results($wpdb->prepare("SELECT post_mime_type AS mime, COUNT(*) AS total FROM {$wpdb->posts} WHERE post_type=%s GROUP BY post_mime_type ORDER BY total DESC LIMIT 8", 'attachment'), ARRAY_A);
+        $mime_types = array();
+        foreach ((array) $mime_rows as $row) {
+            $mime_types[] = array('mime' => $row['mime'] !== '' ? $row['mime'] : '(empty)', 'count' => intval($row['total']));
+        }
         $samples = array();
-        $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, CASE WHEN p.post_parent=0 THEN %s ELSE %s END AS issue FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND (p.post_parent=0 OR pm.meta_id IS NULL) ORDER BY p.ID DESC LIMIT 10", '未挂载', '缺少元数据', '_wp_attachment_metadata', 'attachment'), ARRAY_A);
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, CASE WHEN filepm.meta_id IS NULL THEN %s WHEN metapm.meta_id IS NULL THEN %s WHEN p.post_parent=0 THEN %s ELSE %s END AS issue FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} metapm ON metapm.post_id=p.ID AND metapm.meta_key=%s LEFT JOIN {$wpdb->postmeta} filepm ON filepm.post_id=p.ID AND filepm.meta_key=%s WHERE p.post_type=%s AND (p.post_parent=0 OR metapm.meta_id IS NULL OR filepm.meta_id IS NULL) ORDER BY p.ID DESC LIMIT 12", '缺少文件路径', '缺少元数据', '未挂载', '需审查', '_wp_attachment_metadata', '_wp_attached_file', 'attachment'), ARRAY_A);
         foreach ((array) $rows as $row) {
             $samples[] = array(
                 'id' => intval($row['ID']),
@@ -3311,10 +3362,16 @@ PHP;
         if ($missing_metadata > 0) {
             $recommendations[] = '存在缺少附件元数据的媒体，可能影响缩略图/响应式图片生成。建议抽样再生缩略图，不建议批量删除。';
         }
+        if ($missing_file > 0) {
+            $recommendations[] = '存在缺少 _wp_attached_file 的附件，可能是导入/迁移异常；建议先抽样确认文件是否存在。';
+        }
+        if ($large_originals > 1000) {
+            $recommendations[] = '较多附件元数据很大，可能由超多缩略图尺寸或图片处理插件造成；建议审查缩略图尺寸策略。';
+        }
         if (empty($recommendations)) {
             $recommendations[] = '媒体库基础状态正常。';
         }
-        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'samples' => $samples, 'recommendations' => $recommendations);
+        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'missing_file' => $missing_file, 'large_originals' => $large_originals, 'mime_types' => $mime_types, 'samples' => $samples, 'recommendations' => $recommendations);
     }
 
     private function collect_advanced_cache_report() {
@@ -3374,9 +3431,67 @@ PHP;
         return array('active_plugins' => count($active), 'cache_plugins' => count($notable), 'notable_plugins' => array_slice($notable, 0, 12), 'theme' => $theme->get('Name') . ' ' . $theme->get('Version'), 'recommendations' => $recommendations);
     }
 
+    private function collect_multisite_report() {
+        global $wpdb;
+        $is_multi = is_multisite();
+        $site_count = 1;
+        $current_blog_id = function_exists('get_current_blog_id') ? intval(get_current_blog_id()) : 1;
+        if ($is_multi && function_exists('get_sites')) {
+            $site_count = intval(get_sites(array('count' => true)));
+        }
+        $checks = array();
+        $checks[] = array('label' => 'Multisite', 'value' => $is_multi ? '已启用' : '单站点', 'class' => $is_multi ? 'wplco-warn' : 'wplco-ok', 'hint' => $is_multi ? '当前诊断主要针对当前站点表，网络级治理需逐站评估。' : '当前为单站点。');
+        $checks[] = array('label' => '当前 Blog ID', 'value' => (string) $current_blog_id, 'class' => 'wplco-ok', 'hint' => '用于确认当前诊断对应哪个站点。');
+        $checks[] = array('label' => '站点数量', 'value' => number_format_i18n($site_count), 'class' => ($is_multi && $site_count > 20) ? 'wplco-warn' : 'wplco-ok', 'hint' => $is_multi ? '站点很多时建议分站点检查文章量、缓存和 Cron。' : '');
+        $checks[] = array('label' => '当前表前缀', 'value' => $wpdb->prefix, 'class' => 'wplco-ok', 'hint' => '本插件清理/诊断使用当前站点表前缀。');
+        $network_active = false;
+        if ($is_multi) {
+            if (!function_exists('is_plugin_active_for_network')) {
+                require_once ABSPATH . 'wp-admin/includes/plugin.php';
+            }
+            if (function_exists('is_plugin_active_for_network')) {
+                $network_active = is_plugin_active_for_network(plugin_basename(__FILE__));
+            }
+        }
+        $checks[] = array('label' => '网络启用', 'value' => $network_active ? '是' : '否/不适用', 'class' => $network_active ? 'wplco-warn' : 'wplco-ok', 'hint' => $network_active ? '网络启用时请谨慎使用清理按钮，确认当前站点上下文。' : '');
+        $recommendations = array();
+        if ($is_multi) {
+            $recommendations[] = 'Multisite 环境下，本页只诊断当前站点数据表；不要把当前站点结果直接套用到全网络。';
+            $recommendations[] = '页面缓存、Cron 暂停、Action Scheduler 清理建议逐站确认，避免影响其他子站业务。';
+        } else {
+            $recommendations[] = '当前为单站点，现有清理和诊断范围较明确。';
+        }
+        return array('is_multisite' => $is_multi, 'checks' => $checks, 'recommendations' => $recommendations);
+    }
+
+    private function collect_runtime_profile_report($started, $start_queries, $cached) {
+        global $wpdb;
+        $elapsed = max(0, microtime(true) - floatval($started));
+        $queries = max(0, intval($wpdb->num_queries) - intval($start_queries));
+        $memory = function_exists('memory_get_peak_usage') ? memory_get_peak_usage(true) : 0;
+        $checks = array(
+            array('label' => '诊断来源', 'value' => $cached ? '缓存报告' : '实时生成', 'class' => $cached ? 'wplco-ok' : 'wplco-warn', 'hint' => $cached ? '使用 10 分钟 transient 缓存，避免每次重查。' : '本次重新采集诊断数据。'),
+            array('label' => '诊断耗时', 'value' => number_format_i18n($elapsed, 3) . ' 秒', 'class' => $elapsed > 3 ? 'wplco-warn' : 'wplco-ok', 'hint' => '这是插件诊断页自身的轻量 profiling，不代表前台真实 TTFB。'),
+            array('label' => '诊断 SQL 数', 'value' => number_format_i18n($queries), 'class' => $queries > 80 ? 'wplco-warn' : 'wplco-ok', 'hint' => '仅统计本次诊断过程增加的 $wpdb 查询数。'),
+            array('label' => 'PHP 峰值内存', 'value' => $this->format_bytes($memory), 'class' => $memory > 128 * 1024 * 1024 ? 'wplco-warn' : 'wplco-ok', 'hint' => '用于判断后台诊断是否过重。'),
+        );
+        $recommendations = array();
+        if (!$cached && ($elapsed > 3 || $queries > 80)) {
+            $recommendations[] = '诊断页本身消耗偏高，建议保持诊断缓存，不要频繁刷新；后续可按模块拆分刷新。';
+        } else {
+            $recommendations[] = '诊断页轻量 profiling 正常。真实前台性能仍建议用浏览器瀑布图、Query Monitor 或服务器 APM 交叉验证。';
+        }
+        return array('checks' => $checks, 'recommendations' => $recommendations);
+    }
+
     private function get_diagnostic_report() {
+        $profile_started = microtime(true);
+        $profile_start_queries = isset($GLOBALS['wpdb']->num_queries) ? intval($GLOBALS['wpdb']->num_queries) : 0;
         $cached = get_transient('wplco_diagnostic_report');
         if (is_array($cached)) {
+            if (empty($cached['runtime_profile_report'])) {
+                $cached['runtime_profile_report'] = $this->collect_runtime_profile_report($profile_started, $profile_start_queries, true);
+            }
             return $cached;
         }
 
@@ -3410,7 +3525,9 @@ PHP;
             'commerce_report' => $this->collect_commerce_report(),
             'explain_report' => $this->collect_explain_report(),
             'admin_filter_report' => $this->collect_admin_filter_report(),
+            'multisite_report' => $this->collect_multisite_report(),
         );
+        $report['runtime_profile_report'] = $this->collect_runtime_profile_report($profile_started, $profile_start_queries, false);
         set_transient('wplco_diagnostic_report', $report, 10 * MINUTE_IN_SECONDS);
         return $report;
     }

@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.4.0`
+`3.5.0`
 
 ## 后台入口
 
@@ -43,6 +43,10 @@ https://www.seoyh.net
 - 媒体库问题附件样本审查
 - 页面缓存手动预热与排除规则
 - Cron Hook 来源/回调识别
+- 诊断页轻量 Profiling
+- Multisite 兼容检测
+- 媒体库 MIME 与缺失文件路径检测
+- 慢查询 EXPLAIN 增强采样
 - Action Scheduler 任务状态分布与手动清理
 - Object Cache 能力与缓存分组检测
 - 页面缓存 HIT/MISS/BYPASS 命中统计
@@ -55,6 +59,18 @@ https://www.seoyh.net
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.5.0 慢查询、媒体库与多站点诊断增强
+
+3.5.0 继续补齐剩余诊断能力，重点是更细的只读分析：
+
+- 慢查询 EXPLAIN 采样增加深分页、meta_key、meta_key/meta_value、附件列表等固定安全 SELECT 样本
+- EXPLAIN 表格新增 possible_keys、Extra 和针对每个样本的优化建议
+- 媒体库体检新增缺少 `_wp_attached_file`、大附件元数据、MIME 类型分布和更完整的问题样本
+- 新增 Multisite 兼容检测，明确当前站点表前缀、Blog ID、站点数量和网络启用风险
+- 新增诊断页轻量 Profiling，展示诊断报告生成耗时、SQL 数、PHP 峰值内存和缓存状态
+
+本版仍然不读取慢查询日志、不执行写 SQL、不删除媒体、不跨站点自动治理。
 
 ## 3.4.0 Object Cache 与任务队列治理
 

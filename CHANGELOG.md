@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.5.0 - 2026-05-26
+
+### Added
+
+- 慢查询 EXPLAIN 增加深分页、meta_key、meta_key/meta_value 和附件列表等安全 SELECT 样本。
+- EXPLAIN 结果新增 possible_keys、Extra 和样本级优化建议。
+- 媒体库体检新增缺少 `_wp_attached_file`、大附件元数据、MIME 类型分布与更完整问题样本。
+- 新增 Multisite 兼容检测，展示 Blog ID、站点数量、表前缀和网络启用状态。
+- 新增诊断页轻量 Profiling，展示诊断耗时、SQL 数、PHP 峰值内存和缓存状态。
+
+### Safety
+
+- EXPLAIN 采样仍只读，不读取慢查询日志，不执行写操作。
+- 媒体库增强仍只读，不自动删除附件或再生缩略图。
+- Multisite 环境只提示当前站点上下文，不跨站点自动治理。
+
 ## 3.4.0 - 2026-05-26
 
 ### Added
