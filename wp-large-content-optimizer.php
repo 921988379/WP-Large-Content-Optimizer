@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.1.0
+ * Version: 3.2.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.1.0';
+    const VERSION = '3.2.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -73,6 +73,7 @@ final class WP_Large_Content_Optimizer {
         add_filter('plugins_api', array($this, 'github_plugin_info'), 20, 3);
         add_filter('upgrader_post_install', array($this, 'fix_github_update_folder'), 10, 3);
         add_action(self::CRON_HOOK, array($this, 'run_cron_maintenance'));
+        add_filter('schedule_event', array($this, 'maybe_block_paused_cron_hook'), 10, 1);
     }
 
     public static function activate() {
@@ -101,6 +102,7 @@ final class WP_Large_Content_Optimizer {
             'cron_clean_trash' => 0,
             'cron_clean_orphan_postmeta' => 1,
             'cron_clean_expired_transients' => 1,
+            'cron_paused_hooks' => array(),
             'short_content_chars' => 120,
             'admin_fast_mode' => 1,
             'admin_fast_per_page' => 50,
@@ -578,6 +580,12 @@ final class WP_Large_Content_Optimizer {
             $result = $this->clean_duplicate_cron_events();
         } elseif ($action === 'clear_page_cache') {
             $result = $this->clear_page_cache();
+        } elseif ($action === 'pause_cron_hook') {
+            $result = $this->pause_cron_hook();
+        } elseif ($action === 'resume_cron_hook') {
+            $result = $this->resume_cron_hook();
+        } elseif ($action === 'unschedule_cron_hook') {
+            $result = $this->unschedule_cron_hook();
         } elseif ($action === 'disable_autoload_option') {
             $result = $this->disable_autoload_option();
         } elseif ($action === 'restore_autoload_option') {
@@ -1284,6 +1292,7 @@ final class WP_Large_Content_Optimizer {
                     <div><strong>过期事件</strong><br><span class="wplco-metric <?php echo $cron_report['overdue_events'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['overdue_events'])); ?></span></div>
                     <div><strong>重复事件</strong><br><span class="wplco-metric <?php echo $cron_report['duplicate_events'] ? 'wplco-danger' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['duplicate_events'])); ?></span></div>
                     <div><strong>采集相关事件</strong><br><span class="wplco-metric <?php echo $cron_report['collector_events'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['collector_events'])); ?></span></div>
+                    <div><strong>暂停 Hook</strong><br><span class="wplco-metric <?php echo $cron_report['paused_count'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($cron_report['paused_count'])); ?></span></div>
                 </div>
                 <?php if (!empty($cron_report['recommendations'])): ?>
                     <h3>建议</h3>
@@ -1293,10 +1302,24 @@ final class WP_Large_Content_Optimizer {
                 <?php endif; ?>
                 <h3>高频/重复 Hook TOP</h3>
                 <table class="wplco-table">
-                    <thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>风险</th></tr></thead>
+                    <thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
                     <tbody>
                     <?php foreach ($cron_report['hooks'] as $row): ?>
-                        <tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['next_run']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
+                        <tr>
+                            <td><code><?php echo esc_html($row['hook']); ?></code></td>
+                            <td><?php echo esc_html(number_format_i18n($row['count'])); ?></td>
+                            <td><?php echo esc_html($row['next_run']); ?></td>
+                            <td><span class="<?php echo esc_attr($row['paused'] ? 'wplco-warn' : 'wplco-ok'); ?>"><?php echo esc_html($row['paused'] ? '已暂停新调度' : '正常'); ?></span></td>
+                            <td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td>
+                            <td>
+                                <?php if ($row['paused']): ?>
+                                    <?php $this->action_button_for_cron_hook('resume_cron_hook', $row['hook'], '恢复', '恢复该 Hook 的新 Cron 调度？'); ?>
+                                <?php else: ?>
+                                    <?php $this->action_button_for_cron_hook('pause_cron_hook', $row['hook'], '暂停新调度', '只会阻止该 Hook 后续新增 Cron 调度，不会删除已存在事件。确定继续？'); ?>
+                                <?php endif; ?>
+                                <?php $this->action_button_for_cron_hook('unschedule_cron_hook', $row['hook'], '删除此 Hook 事件', '将删除该 Hook 当前已计划的全部 Cron 事件。这可能影响插件/主题任务，请确认来源后再继续。确定删除？', 'delete'); ?>
+                            </td>
+                        </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
@@ -1423,7 +1446,11 @@ final class WP_Large_Content_Optimizer {
                         <div><strong>缺少元数据</strong><br><span class="wplco-metric <?php echo $media_report['missing_metadata'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['missing_metadata'])); ?></span></div>
                     </div>
                     <?php if (!empty($media_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($media_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
-                    <p class="wplco-small">媒体库只读体检，不自动删除附件。未挂载不一定是垃圾，可能被主题/字段引用。</p>
+                    <?php if (!empty($media_report['samples'])): ?>
+                        <h3>待审查附件样本</h3>
+                        <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>问题</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><span class="wplco-warn"><?php echo esc_html($row['issue']); ?></span></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
+                    <p class="wplco-small">媒体库只读体检，不自动删除附件。未挂载不一定是垃圾，可能被主题/字段引用；缺少元数据建议先单个再生缩略图确认。</p>
                 </div>
                 <div class="wplco-card">
                     <h2>插件/主题体检</h2>
@@ -1738,6 +1765,17 @@ final class WP_Large_Content_Optimizer {
             <?php wp_nonce_field('wplco_action', 'wplco_nonce'); ?>
             <input type="hidden" name="wplco_action" value="<?php echo esc_attr($action); ?>">
             <?php submit_button($label, 'secondary', 'submit', false); ?>
+        </form>
+        <?php
+    }
+
+    private function action_button_for_cron_hook($action, $hook, $label, $confirm, $button_class = 'secondary') {
+        ?>
+        <form method="post" style="display:inline-block;margin:0 4px 4px 0" onsubmit="return confirm('<?php echo esc_js($confirm); ?>');">
+            <?php wp_nonce_field('wplco_action', 'wplco_nonce'); ?>
+            <input type="hidden" name="wplco_action" value="<?php echo esc_attr($action); ?>">
+            <input type="hidden" name="cron_hook" value="<?php echo esc_attr($hook); ?>">
+            <?php submit_button($label, $button_class, 'submit', false); ?>
         </form>
         <?php
     }
@@ -2285,6 +2323,7 @@ PHP;
                 'distinct_values' => $distinct,
                 'risk' => $risk,
                 'class' => $class,
+                'paused' => in_array($row['hook'], $paused_hooks, true),
             );
         }
 
@@ -2414,6 +2453,7 @@ PHP;
         $overdue = 0;
         $duplicates = 0;
         $collector_events = 0;
+        $paused_hooks = $this->paused_cron_hooks();
 
         foreach ((array) $cron as $timestamp => $events) {
             foreach ((array) $events as $hook => $instances) {
@@ -2470,6 +2510,7 @@ PHP;
                 'next_run' => $row['next'] ? date_i18n('Y-m-d H:i:s', $row['next']) : '-',
                 'risk' => $risk,
                 'class' => $class,
+                'paused' => in_array($row['hook'], $paused_hooks, true),
             );
             $hook_rows[] = $item;
             if (!empty($row['collector'])) {
@@ -2487,6 +2528,9 @@ PHP;
         if ($collector_events > 0) {
             $recommendations[] = '检测到采集相关 Cron 事件，请确认采集频率不要过高，建议使用随机延迟或错峰执行。';
         }
+        if (!empty($paused_hooks)) {
+            $recommendations[] = '已有 ' . count($paused_hooks) . ' 个 Hook 被暂停新调度；请定期确认是否仍需要暂停，避免影响插件正常任务。';
+        }
         if (!(defined('DISABLE_WP_CRON') && DISABLE_WP_CRON)) {
             $recommendations[] = '当前 WP-Cron 可能仍由访问触发。大站建议设置 DISABLE_WP_CRON，并用服务器 crontab 定时调用 wp-cron.php。';
         }
@@ -2499,10 +2543,83 @@ PHP;
             'overdue_events' => $overdue,
             'duplicate_events' => $duplicates,
             'collector_events' => $collector_events,
+            'paused_count' => count($paused_hooks),
+            'paused_hooks' => $paused_hooks,
             'hooks' => array_slice($hook_rows, 0, 15),
             'collector_hooks' => array_slice($collector_rows, 0, 10),
             'recommendations' => array_slice($recommendations, 0, 6),
         );
+    }
+
+    private function paused_cron_hooks() {
+        $settings = $this->settings();
+        $hooks = isset($settings['cron_paused_hooks']) && is_array($settings['cron_paused_hooks']) ? $settings['cron_paused_hooks'] : array();
+        $hooks = array_values(array_unique(array_filter(array_map('strval', $hooks))));
+        return $hooks;
+    }
+
+    private function requested_cron_hook() {
+        $hook = isset($_POST['cron_hook']) ? sanitize_text_field(wp_unslash($_POST['cron_hook'])) : '';
+        $hook = preg_replace('/[^A-Za-z0-9_\-:\.\/]/', '', $hook);
+        return substr($hook, 0, 191);
+    }
+
+    public function maybe_block_paused_cron_hook($event) {
+        if (!is_object($event) || empty($event->hook)) {
+            return $event;
+        }
+        if (in_array($event->hook, $this->paused_cron_hooks(), true)) {
+            return false;
+        }
+        return $event;
+    }
+
+    private function pause_cron_hook() {
+        $hook = $this->requested_cron_hook();
+        if ($hook === '' || $hook === self::CRON_HOOK) {
+            return array('type' => 'error', 'message' => 'Hook 无效或不允许暂停本插件维护任务。');
+        }
+        $settings = $this->settings();
+        $hooks = $this->paused_cron_hooks();
+        if (!in_array($hook, $hooks, true)) {
+            $hooks[] = $hook;
+        }
+        $settings['cron_paused_hooks'] = array_values(array_unique($hooks));
+        update_option(self::OPTION, $settings, false);
+        return array('type' => 'success', 'message' => '已暂停 Hook 的新 Cron 调度：' . $hook . '。已存在事件不会自动删除。');
+    }
+
+    private function resume_cron_hook() {
+        $hook = $this->requested_cron_hook();
+        if ($hook === '') {
+            return array('type' => 'error', 'message' => 'Hook 无效。');
+        }
+        $settings = $this->settings();
+        $settings['cron_paused_hooks'] = array_values(array_diff($this->paused_cron_hooks(), array($hook)));
+        update_option(self::OPTION, $settings, false);
+        return array('type' => 'success', 'message' => '已恢复 Hook 的新 Cron 调度：' . $hook . '。');
+    }
+
+    private function unschedule_cron_hook() {
+        $hook = $this->requested_cron_hook();
+        if ($hook === '' || $hook === self::CRON_HOOK) {
+            return array('type' => 'error', 'message' => 'Hook 无效或不允许删除本插件维护任务。');
+        }
+        $cron = _get_cron_array();
+        $removed = 0;
+        foreach ((array) $cron as $timestamp => $events) {
+            if (empty($events[$hook])) {
+                continue;
+            }
+            foreach ((array) $events[$hook] as $event) {
+                $args = isset($event['args']) ? $event['args'] : array();
+                if (wp_unschedule_event(intval($timestamp), $hook, $args)) {
+                    $removed++;
+                }
+            }
+        }
+        delete_transient('wplco_diagnostic_report');
+        return array('type' => 'success', 'message' => '已删除 Hook `' . $hook . '` 当前计划事件：' . number_format_i18n($removed) . ' 个。');
     }
 
     private function clean_duplicate_cron_events() {
@@ -2729,6 +2846,16 @@ PHP;
         $attachments = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s", 'attachment')));
         $unattached = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s AND post_parent=0", 'attachment')));
         $missing_metadata = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND pm.meta_id IS NULL", '_wp_attachment_metadata', 'attachment')));
+        $samples = array();
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, CASE WHEN p.post_parent=0 THEN %s ELSE %s END AS issue FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND (p.post_parent=0 OR pm.meta_id IS NULL) ORDER BY p.ID DESC LIMIT 10", '未挂载', '缺少元数据', '_wp_attachment_metadata', 'attachment'), ARRAY_A);
+        foreach ((array) $rows as $row) {
+            $samples[] = array(
+                'id' => intval($row['ID']),
+                'title' => $row['post_title'] !== '' ? $row['post_title'] : '(无标题)',
+                'issue' => $row['issue'],
+                'edit_url' => get_edit_post_link(intval($row['ID']), ''),
+            );
+        }
         $recommendations = array();
         if ($attachments > 50000) {
             $recommendations[] = '附件数量很高，媒体库查询和备份会变慢，建议启用对象缓存/CDN，并定期审查未使用媒体。';
@@ -2737,12 +2864,12 @@ PHP;
             $recommendations[] = '未挂载附件较多，但不能直接视为垃圾；建议结合内容字段和主题引用人工审查。';
         }
         if ($missing_metadata > 0) {
-            $recommendations[] = '存在缺少附件元数据的媒体，可能影响缩略图/响应式图片生成。';
+            $recommendations[] = '存在缺少附件元数据的媒体，可能影响缩略图/响应式图片生成。建议抽样再生缩略图，不建议批量删除。';
         }
         if (empty($recommendations)) {
             $recommendations[] = '媒体库基础状态正常。';
         }
-        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'recommendations' => $recommendations);
+        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'samples' => $samples, 'recommendations' => $recommendations);
     }
 
     private function collect_advanced_cache_report() {
