@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 2.9.0
+ * Version: 3.0.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.9.0';
+    const VERSION = '3.0.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -64,6 +64,10 @@ final class WP_Large_Content_Optimizer {
         add_action('template_redirect', array($this, 'maybe_serve_page_cache'), 0);
         add_action('shutdown', array($this, 'maybe_store_page_cache'), 0);
         add_action('init', array($this, 'frontend_light_optimizations'));
+        add_action('admin_enqueue_scripts', array($this, 'admin_heartbeat_control'));
+        add_filter('heartbeat_settings', array($this, 'heartbeat_settings'));
+        add_filter('xmlrpc_enabled', array($this, 'maybe_disable_xmlrpc'));
+        add_filter('rest_authentication_errors', array($this, 'maybe_restrict_rest_api'));
         add_filter('pre_set_site_transient_update_plugins', array($this, 'check_github_update'));
         add_filter('plugins_api', array($this, 'github_plugin_info'), 20, 3);
         add_filter('upgrader_post_install', array($this, 'fix_github_update_folder'), 10, 3);
@@ -111,6 +115,12 @@ final class WP_Large_Content_Optimizer {
             'frontend_disable_embeds' => 0,
             'frontend_disable_dashicons' => 0,
             'frontend_disable_generator' => 1,
+            'frontend_disable_feed_links' => 0,
+            'frontend_disable_rest_links' => 1,
+            'frontend_disable_xmlrpc' => 0,
+            'frontend_restrict_rest_guests' => 0,
+            'heartbeat_mode' => 'reduce',
+            'heartbeat_interval' => 60,
             'page_cache_enabled' => 0,
             'page_cache_ttl' => 3600,
             'page_cache_home' => 1,
@@ -608,6 +618,13 @@ final class WP_Large_Content_Optimizer {
         $old_page_cache_enabled = !empty($settings['page_cache_enabled']);
         $old_page_cache_ttl = intval($settings['page_cache_ttl'] ?? 3600);
         $settings['frontend_disable_generator'] = empty($_POST['frontend_disable_generator']) ? 0 : 1;
+        $settings['frontend_disable_feed_links'] = empty($_POST['frontend_disable_feed_links']) ? 0 : 1;
+        $settings['frontend_disable_rest_links'] = empty($_POST['frontend_disable_rest_links']) ? 0 : 1;
+        $settings['frontend_disable_xmlrpc'] = empty($_POST['frontend_disable_xmlrpc']) ? 0 : 1;
+        $settings['frontend_restrict_rest_guests'] = empty($_POST['frontend_restrict_rest_guests']) ? 0 : 1;
+        $heartbeat_mode = isset($_POST['heartbeat_mode']) ? sanitize_key(wp_unslash($_POST['heartbeat_mode'])) : 'reduce';
+        $settings['heartbeat_mode'] = in_array($heartbeat_mode, array('keep','reduce','disable'), true) ? $heartbeat_mode : 'reduce';
+        $settings['heartbeat_interval'] = min(120, max(15, intval($_POST['heartbeat_interval'] ?? 60)));
         $settings['page_cache_enabled'] = empty($_POST['page_cache_enabled']) ? 0 : 1;
         $settings['page_cache_ttl'] = min(DAY_IN_SECONDS, max(300, intval($_POST['page_cache_ttl'] ?? 3600)));
         $settings['page_cache_home'] = empty($_POST['page_cache_home']) ? 0 : 1;
@@ -897,6 +914,12 @@ final class WP_Large_Content_Optimizer {
         $page_cache_report = $report['page_cache_report'];
         $slow_risk_report = $report['slow_risk_report'];
         $cron_report = $report['cron_report'];
+        $ajax_report = $report['ajax_report'];
+        $media_report = $report['media_report'];
+        $advanced_cache_report = $report['advanced_cache_report'];
+        $plugin_theme_report = $report['plugin_theme_report'];
+        $trend_report = $report['trend_report'];
+        $commerce_report = $report['commerce_report'];
         $settings = $this->settings();
         $logs = $this->get_logs();
         $notice = get_transient('wplco_admin_notice_' . get_current_user_id());
@@ -1258,6 +1281,22 @@ final class WP_Large_Content_Optimizer {
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
+                <h2>WooCommerce/Action Scheduler 检测</h2>
+                <p class="wplco-small">只读检测 WooCommerce 与 Action Scheduler 表/任务状态。未安装 WooCommerce 时也可以安全忽略。</p>
+                <div class="wplco-env">
+                    <div><strong>WooCommerce</strong><br><span class="<?php echo esc_attr($commerce_report['woocommerce_class']); ?>"><?php echo esc_html($commerce_report['woocommerce']); ?></span></div>
+                    <div><strong>Action Scheduler</strong><br><span class="<?php echo esc_attr($commerce_report['scheduler_class']); ?>"><?php echo esc_html($commerce_report['scheduler']); ?></span></div>
+                    <div><strong>待执行任务</strong><br><span class="wplco-metric <?php echo $commerce_report['pending_actions'] > 1000 ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['pending_actions'])); ?></span></div>
+                    <div><strong>失败任务</strong><br><span class="wplco-metric <?php echo $commerce_report['failed_actions'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['failed_actions'])); ?></span></div>
+                </div>
+                <?php if (!empty($commerce_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($commerce_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                <?php if (!empty($commerce_report['top_hooks'])): ?>
+                    <h3>Action Scheduler Hook TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['top_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
                 <h2>前台性能与缓存检测</h2>
                 <div class="wplco-env">
                     <?php foreach ($frontend_report['checks'] as $item): ?>
@@ -1307,6 +1346,53 @@ final class WP_Large_Content_Optimizer {
                     </ul>
                 <?php endif; ?>
                 <p><?php $this->action_button('clear_page_cache', '清空页面缓存', '确定清空本插件生成的页面缓存？不会删除文章和数据库数据。'); ?></p>
+            </div>
+
+            <div class="wplco-two">
+                <div class="wplco-card">
+                    <h2>高级缓存就绪检查</h2>
+                    <div class="wplco-env">
+                        <div><strong>WP_CACHE</strong><br><span class="<?php echo esc_attr($advanced_cache_report['wp_cache_class']); ?>"><?php echo esc_html($advanced_cache_report['wp_cache']); ?></span></div>
+                        <div><strong>advanced-cache.php</strong><br><span class="<?php echo esc_attr($advanced_cache_report['dropin_class']); ?>"><?php echo esc_html($advanced_cache_report['dropin']); ?></span></div>
+                        <div><strong>本插件轻量缓存</strong><br><span class="<?php echo $page_cache_report['enabled'] ? 'wplco-ok' : 'wplco-warn'; ?>"><?php echo esc_html($page_cache_report['enabled'] ? '已开启' : '未开启'); ?></span></div>
+                    </div>
+                    <?php if (!empty($advanced_cache_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($advanced_cache_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    <p class="wplco-small">高级缓存 drop-in 属于高影响功能，本版只做就绪检查，不自动写入 <code>advanced-cache.php</code>，避免和服务器级缓存冲突。</p>
+                </div>
+                <div class="wplco-card">
+                    <h2>admin-ajax 诊断</h2>
+                    <div class="wplco-env">
+                        <div><strong>登录 AJAX Hook</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($ajax_report['priv_count'])); ?></span></div>
+                        <div><strong>访客 AJAX Hook</strong><br><span class="wplco-metric <?php echo $ajax_report['nopriv_count'] > 20 ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($ajax_report['nopriv_count'])); ?></span></div>
+                        <div><strong>Heartbeat</strong><br><span class="<?php echo esc_attr($ajax_report['heartbeat_class']); ?>"><?php echo esc_html($ajax_report['heartbeat']); ?></span></div>
+                    </div>
+                    <?php if (!empty($ajax_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($ajax_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    <h3>访客 AJAX Hook TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>回调数</th></tr></thead><tbody><?php foreach ($ajax_report['nopriv_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['callbacks'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                </div>
+            </div>
+
+            <div class="wplco-two">
+                <div class="wplco-card">
+                    <h2>媒体库体检</h2>
+                    <div class="wplco-env">
+                        <div><strong>附件总数</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($media_report['attachments'])); ?></span></div>
+                        <div><strong>未挂载附件</strong><br><span class="wplco-metric <?php echo $media_report['unattached'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['unattached'])); ?></span></div>
+                        <div><strong>缺少元数据</strong><br><span class="wplco-metric <?php echo $media_report['missing_metadata'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($media_report['missing_metadata'])); ?></span></div>
+                    </div>
+                    <?php if (!empty($media_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($media_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    <p class="wplco-small">媒体库只读体检，不自动删除附件。未挂载不一定是垃圾，可能被主题/字段引用。</p>
+                </div>
+                <div class="wplco-card">
+                    <h2>插件/主题体检</h2>
+                    <div class="wplco-env">
+                        <div><strong>启用插件</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($plugin_theme_report['active_plugins'])); ?></span></div>
+                        <div><strong>可能影响缓存插件</strong><br><span class="wplco-metric <?php echo $plugin_theme_report['cache_plugins'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($plugin_theme_report['cache_plugins'])); ?></span></div>
+                        <div><strong>当前主题</strong><br><span><?php echo esc_html($plugin_theme_report['theme']); ?></span></div>
+                    </div>
+                    <?php if (!empty($plugin_theme_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($plugin_theme_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                    <table class="wplco-table"><thead><tr><th>插件</th><th>提示</th></tr></thead><tbody><?php foreach ($plugin_theme_report['notable_plugins'] as $row): ?><tr><td><code><?php echo esc_html($row['plugin']); ?></code></td><td><?php echo esc_html($row['hint']); ?></td></tr><?php endforeach; ?></tbody></table>
+                </div>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -1361,6 +1447,24 @@ final class WP_Large_Content_Optimizer {
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
+                <h2>性能趋势记录</h2>
+                <p class="wplco-small">每次刷新诊断时记录关键指标，最多保留最近 30 次。用于观察清理/优化后数据是否真的下降。</p>
+                <table class="wplco-table">
+                    <thead><tr><th>时间</th><th>健康分</th><th>wp_posts</th><th>postmeta</th><th>autoload 数量</th><th>过期 transient</th></tr></thead>
+                    <tbody>
+                    <?php if (empty($trend_report['history'])): ?>
+                        <tr><td colspan="6">暂无趋势记录。刷新诊断报告后会自动记录。</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($trend_report['history'] as $row): ?>
+                            <tr><td><?php echo esc_html($row['time']); ?></td><td><?php echo esc_html($row['score']); ?></td><td><?php echo esc_html(number_format_i18n($row['posts'])); ?></td><td><?php echo esc_html(number_format_i18n($row['postmeta'])); ?></td><td><?php echo esc_html(number_format_i18n($row['autoload'])); ?></td><td><?php echo esc_html(number_format_i18n($row['expired_transients'])); ?></td></tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+                <?php if (!empty($trend_report['summary'])): ?><p class="wplco-small"><?php echo esc_html($trend_report['summary']); ?></p><?php endif; ?>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
                 <h2>数据库维护日志</h2>
                 <p class="wplco-small">记录最近 100 条维护操作，包括清理、加索引、移动重复草稿等。日志保存在 WordPress options 中。</p>
                 <table class="wplco-table">
@@ -1411,6 +1515,14 @@ final class WP_Large_Content_Optimizer {
                     <label><input type="checkbox" name="frontend_disable_embeds" value="1" <?php checked($settings['frontend_disable_embeds']); ?>> 禁用 oEmbed 发现与嵌入脚本 <span class="wplco-small">如果文章需要嵌入 YouTube/推文等，不建议开启。</span></label>
                     <label><input type="checkbox" name="frontend_disable_dashicons" value="1" <?php checked($settings['frontend_disable_dashicons']); ?>> 访客前台禁用 Dashicons</label>
                     <label><input type="checkbox" name="frontend_disable_generator" value="1" <?php checked($settings['frontend_disable_generator']); ?>> 移除 WordPress generator 版本标签</label>
+                    <label><input type="checkbox" name="frontend_disable_feed_links" value="1" <?php checked($settings['frontend_disable_feed_links']); ?>> 移除 feed 自动发现链接 <span class="wplco-small">不关闭 feed 地址本身，只减少 head 输出。</span></label>
+                    <label><input type="checkbox" name="frontend_disable_rest_links" value="1" <?php checked($settings['frontend_disable_rest_links']); ?>> 移除 REST API 发现链接</label>
+                    <label><input type="checkbox" name="frontend_disable_xmlrpc" value="1" <?php checked($settings['frontend_disable_xmlrpc']); ?>> 禁用 XML-RPC <span class="wplco-small">若使用 Jetpack/App 远程发布，请不要开启。</span></label>
+                    <label><input type="checkbox" name="frontend_restrict_rest_guests" value="1" <?php checked($settings['frontend_restrict_rest_guests']); ?>> 限制访客访问 REST API <span class="wplco-small">默认关闭；可能影响前端区块/小程序/API 调用。</span></label>
+                    <hr>
+                    <h3>Heartbeat 控制</h3>
+                    <label>Heartbeat 模式：<select name="heartbeat_mode"><option value="keep" <?php selected($settings['heartbeat_mode'], 'keep'); ?>>保持默认</option><option value="reduce" <?php selected($settings['heartbeat_mode'], 'reduce'); ?>>降频</option><option value="disable" <?php selected($settings['heartbeat_mode'], 'disable'); ?>>非编辑页禁用</option></select></label>
+                    <label>Heartbeat 间隔：<input class="wplco-number" type="number" name="heartbeat_interval" min="15" max="120" value="<?php echo esc_attr($settings['heartbeat_interval']); ?>"> 秒 <span class="wplco-small">降频模式建议 60-120 秒。</span></label>
                     <hr>
                     <h3>页面缓存</h3>
                     <label><input type="checkbox" name="page_cache_enabled" value="1" <?php checked($settings['page_cache_enabled']); ?>> 启用轻量页面缓存 <span class="wplco-small">默认关闭；如果服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、WP Rocket 等页面缓存，请不要重复开启。</span></label>
@@ -1439,11 +1551,11 @@ final class WP_Large_Content_Optimizer {
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
                     '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
-                    'WP-Cron 与采集任务检测':'cron',
-                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','数据库维护日志':'logs','设置':'settings'
+                    'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
+                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
-                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器'];
+                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器','admin-ajax 诊断','媒体库体检','插件/主题体检','WooCommerce/Action Scheduler 检测'];
                 cards.forEach(function(card){
                     var h2=card.querySelector(':scope > h2');
                     if(!h2 || card.classList.contains('wplco-js-ready')){return;}
@@ -1591,6 +1703,17 @@ final class WP_Large_Content_Optimizer {
         if (!empty($settings['frontend_disable_generator'])) {
             remove_action('wp_head', 'wp_generator');
         }
+
+        if (!empty($settings['frontend_disable_feed_links'])) {
+            remove_action('wp_head', 'feed_links', 2);
+            remove_action('wp_head', 'feed_links_extra', 3);
+        }
+
+        if (!empty($settings['frontend_disable_rest_links'])) {
+            remove_action('wp_head', 'rest_output_link_wp_head');
+            remove_action('wp_head', 'wp_oembed_add_discovery_links');
+            remove_action('template_redirect', 'rest_output_link_header', 11);
+        }
     }
 
     public function dequeue_embed_script() {
@@ -1602,6 +1725,41 @@ final class WP_Large_Content_Optimizer {
             wp_dequeue_style('dashicons');
             wp_deregister_style('dashicons');
         }
+    }
+
+    public function admin_heartbeat_control($hook_suffix) {
+        $settings = $this->settings();
+        if (($settings['heartbeat_mode'] ?? 'reduce') !== 'disable') {
+            return;
+        }
+        if (in_array($hook_suffix, array('post.php', 'post-new.php'), true)) {
+            return;
+        }
+        wp_deregister_script('heartbeat');
+    }
+
+    public function heartbeat_settings($settings) {
+        $plugin_settings = $this->settings();
+        if (($plugin_settings['heartbeat_mode'] ?? 'reduce') === 'reduce') {
+            $settings['interval'] = min(120, max(15, intval($plugin_settings['heartbeat_interval'] ?? 60)));
+        }
+        return $settings;
+    }
+
+    public function maybe_disable_xmlrpc($enabled) {
+        $settings = $this->settings();
+        return !empty($settings['frontend_disable_xmlrpc']) ? false : $enabled;
+    }
+
+    public function maybe_restrict_rest_api($result) {
+        if (!empty($result)) {
+            return $result;
+        }
+        $settings = $this->settings();
+        if (empty($settings['frontend_restrict_rest_guests']) || is_user_logged_in()) {
+            return $result;
+        }
+        return new WP_Error('wplco_rest_restricted', 'REST API 已限制访客访问。', array('status' => 401));
     }
 
     private function page_cache_dir() {
@@ -2228,6 +2386,200 @@ final class WP_Large_Content_Optimizer {
     }
 
 
+    private function collect_trend_report($stats) {
+        $history = get_option('wplco_trend_history', array());
+        if (!is_array($history)) {
+            $history = array();
+        }
+        $get = function($label) use ($stats) {
+            return isset($stats[$label]['value']) ? intval($stats[$label]['value']) : 0;
+        };
+        $score = $this->build_diagnosis($stats, $this->recommended_indexes_status());
+        $snapshot = array(
+            'time' => current_time('mysql'),
+            'score' => intval($score['score']),
+            'posts' => $get('文章/页面/附件总数 wp_posts'),
+            'postmeta' => $get('postmeta 总数'),
+            'autoload' => $get('autoload options 数量'),
+            'expired_transients' => $get('过期 transient'),
+        );
+        $last = !empty($history) ? end($history) : null;
+        if (!$last || substr($last['time'], 0, 16) !== substr($snapshot['time'], 0, 16)) {
+            $history[] = $snapshot;
+            $history = array_slice($history, -30);
+            update_option('wplco_trend_history', $history, false);
+        }
+        $summary = '';
+        if (count($history) >= 2) {
+            $first = reset($history);
+            $latest = end($history);
+            $delta_meta = intval($latest['postmeta']) - intval($first['postmeta']);
+            $delta_posts = intval($latest['posts']) - intval($first['posts']);
+            $summary = '最近 ' . count($history) . ' 次记录：wp_posts 变化 ' . number_format_i18n($delta_posts) . '，postmeta 变化 ' . number_format_i18n($delta_meta) . '。';
+        }
+        return array('history' => array_reverse($history), 'summary' => $summary);
+    }
+
+    private function collect_commerce_report() {
+        global $wpdb;
+        $woocommerce = class_exists('WooCommerce') || in_array('woocommerce/woocommerce.php', (array) get_option('active_plugins', array()), true);
+        $actions_table = $wpdb->prefix . 'actionscheduler_actions';
+        $has_actions = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $actions_table)) === $actions_table;
+        $pending = 0;
+        $failed = 0;
+        $top_hooks = array();
+        if ($has_actions) {
+            $pending = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='pending'"));
+            $failed = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='failed'"));
+            $rows = $wpdb->get_results("SELECT hook, COUNT(*) AS total FROM {$actions_table} WHERE status IN ('pending','failed') GROUP BY hook ORDER BY total DESC LIMIT 10", ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $top_hooks[] = array('hook' => $row['hook'], 'count' => intval($row['total']));
+            }
+        }
+        $recommendations = array();
+        if (!$woocommerce && !$has_actions) {
+            $recommendations[] = '未检测到 WooCommerce / Action Scheduler，可忽略本模块。';
+        }
+        if ($pending > 1000) {
+            $recommendations[] = 'Action Scheduler 待执行任务超过 1000，建议检查队列是否堵塞、WP-Cron 是否稳定、采集/同步任务是否过频。';
+        }
+        if ($failed > 0) {
+            $recommendations[] = '存在失败 Action Scheduler 任务，建议到 WooCommerce/工具页面查看失败原因并清理。';
+        }
+        if ($woocommerce) {
+            $recommendations[] = 'WooCommerce 站点建议重点关注订单表、Action Scheduler、购物车 fragments 与对象缓存命中率。';
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = 'Action Scheduler 基础状态正常。';
+        }
+        return array(
+            'woocommerce' => $woocommerce ? '已检测到' : '未检测到',
+            'woocommerce_class' => $woocommerce ? 'wplco-warn' : 'wplco-ok',
+            'scheduler' => $has_actions ? '已检测到' : '未检测到',
+            'scheduler_class' => $has_actions ? 'wplco-ok' : 'wplco-warn',
+            'pending_actions' => $pending,
+            'failed_actions' => $failed,
+            'top_hooks' => $top_hooks,
+            'recommendations' => $recommendations,
+        );
+    }
+
+    private function collect_ajax_report() {
+        global $wp_filter;
+        $count_callbacks = function($hook) use ($wp_filter) {
+            if (empty($wp_filter[$hook]) || !is_object($wp_filter[$hook]) || empty($wp_filter[$hook]->callbacks)) {
+                return 0;
+            }
+            $total = 0;
+            foreach ($wp_filter[$hook]->callbacks as $callbacks) {
+                $total += count($callbacks);
+            }
+            return $total;
+        };
+        $priv = array();
+        $nopriv = array();
+        foreach (array_keys((array) $wp_filter) as $hook) {
+            if (strpos($hook, 'wp_ajax_nopriv_') === 0) {
+                $nopriv[] = array('hook' => substr($hook, 15), 'callbacks' => $count_callbacks($hook));
+            } elseif (strpos($hook, 'wp_ajax_') === 0) {
+                $priv[] = array('hook' => substr($hook, 8), 'callbacks' => $count_callbacks($hook));
+            }
+        }
+        usort($nopriv, function($a, $b) { return $b['callbacks'] <=> $a['callbacks']; });
+        $settings = $this->settings();
+        $mode = $settings['heartbeat_mode'] ?? 'reduce';
+        $recommendations = array();
+        if (count($nopriv) > 20) {
+            $recommendations[] = '访客 admin-ajax hook 较多，建议排查统计、弹窗、表单、采集或前端插件是否频繁请求 admin-ajax.php。';
+        }
+        if ($mode === 'keep') {
+            $recommendations[] = 'Heartbeat 仍保持默认。后台用户较多或编辑页长期打开时，建议改为降频。';
+        } elseif ($mode === 'disable') {
+            $recommendations[] = 'Heartbeat 已设置为非编辑页禁用，可降低后台空闲 AJAX 压力。';
+        } else {
+            $recommendations[] = 'Heartbeat 已降频，适合大站后台常驻页面。';
+        }
+        return array(
+            'priv_count' => count($priv),
+            'nopriv_count' => count($nopriv),
+            'nopriv_hooks' => array_slice($nopriv, 0, 12),
+            'heartbeat' => $mode === 'keep' ? '默认' : ($mode === 'disable' ? '非编辑页禁用' : '降频'),
+            'heartbeat_class' => $mode === 'keep' ? 'wplco-warn' : 'wplco-ok',
+            'recommendations' => $recommendations,
+        );
+    }
+
+    private function collect_media_report() {
+        global $wpdb;
+        $attachments = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s", 'attachment')));
+        $unattached = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type=%s AND post_parent=0", 'attachment')));
+        $missing_metadata = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND pm.meta_id IS NULL", '_wp_attachment_metadata', 'attachment')));
+        $recommendations = array();
+        if ($attachments > 50000) {
+            $recommendations[] = '附件数量很高，媒体库查询和备份会变慢，建议启用对象缓存/CDN，并定期审查未使用媒体。';
+        }
+        if ($unattached > 1000) {
+            $recommendations[] = '未挂载附件较多，但不能直接视为垃圾；建议结合内容字段和主题引用人工审查。';
+        }
+        if ($missing_metadata > 0) {
+            $recommendations[] = '存在缺少附件元数据的媒体，可能影响缩略图/响应式图片生成。';
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = '媒体库基础状态正常。';
+        }
+        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'recommendations' => $recommendations);
+    }
+
+    private function collect_advanced_cache_report() {
+        $dropin = WP_CONTENT_DIR . '/advanced-cache.php';
+        $has_dropin = file_exists($dropin);
+        $wp_cache = defined('WP_CACHE') && WP_CACHE;
+        $recommendations = array();
+        if (!$wp_cache) {
+            $recommendations[] = 'WP_CACHE 未开启；高级页面缓存 drop-in 即使存在也通常不会生效。';
+        }
+        if ($has_dropin) {
+            $recommendations[] = '检测到 advanced-cache.php，请确认它来自当前使用的缓存方案，避免多个页面缓存同时接管。';
+        } else {
+            $recommendations[] = '未检测到 advanced-cache.php。当前本插件仍使用轻量 template_redirect 缓存，安全但不能完全绕过 WP 启动。';
+        }
+        $recommendations[] = '如服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、Cloudflare APO 或 WP Rocket，不建议再叠加高级 drop-in。';
+        return array(
+            'wp_cache' => $wp_cache ? '已开启' : '未开启',
+            'wp_cache_class' => $wp_cache ? 'wplco-ok' : 'wplco-warn',
+            'dropin' => $has_dropin ? '已存在' : '未发现',
+            'dropin_class' => $has_dropin ? 'wplco-warn' : 'wplco-ok',
+            'recommendations' => $recommendations,
+        );
+    }
+
+    private function collect_plugin_theme_report() {
+        $active = (array) get_option('active_plugins', array());
+        $cache_keywords = array('cache','rocket','litespeed','redis','w3-total','wp-super-cache','autoptimize','sg-cachepress','breeze','cloudflare');
+        $notable = array();
+        foreach ($active as $plugin) {
+            $lower = strtolower($plugin);
+            foreach ($cache_keywords as $keyword) {
+                if (strpos($lower, $keyword) !== false) {
+                    $notable[] = array('plugin' => $plugin, 'hint' => '可能影响缓存/资源优化，请避免功能重复开启。');
+                    break;
+                }
+            }
+        }
+        $recommendations = array();
+        if (count($active) > 40) {
+            $recommendations[] = '启用插件超过 40 个，建议排查慢插件、重复功能插件和前台加载资源。';
+        }
+        if (!empty($notable)) {
+            $recommendations[] = '检测到缓存/优化类插件，请避免与本插件页面缓存、前台瘦身功能重复。';
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = '插件数量和缓存冲突风险暂未发现明显异常。';
+        }
+        $theme = wp_get_theme();
+        return array('active_plugins' => count($active), 'cache_plugins' => count($notable), 'notable_plugins' => array_slice($notable, 0, 12), 'theme' => $theme->get('Name') . ' ' . $theme->get('Version'), 'recommendations' => $recommendations);
+    }
+
     private function get_diagnostic_report() {
         $cached = get_transient('wplco_diagnostic_report');
         if (is_array($cached)) {
@@ -2256,6 +2608,12 @@ final class WP_Large_Content_Optimizer {
             'page_cache_report' => $this->collect_page_cache_report(),
             'slow_risk_report' => $this->collect_slow_risk_report(),
             'cron_report' => $this->collect_cron_report(),
+            'ajax_report' => $this->collect_ajax_report(),
+            'media_report' => $this->collect_media_report(),
+            'advanced_cache_report' => $this->collect_advanced_cache_report(),
+            'plugin_theme_report' => $this->collect_plugin_theme_report(),
+            'trend_report' => $this->collect_trend_report($stats),
+            'commerce_report' => $this->collect_commerce_report(),
         );
         set_transient('wplco_diagnostic_report', $report, 10 * MINUTE_IN_SECONDS);
         return $report;

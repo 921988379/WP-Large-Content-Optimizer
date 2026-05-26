@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.9.0
+Stable tag: 3.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -42,6 +42,12 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * autoload 优化器
 * 轻量页面缓存（默认关闭）
 * Redis/Object Cache 深度检测
+* REST/XML-RPC/feed 轻量控制
+* WooCommerce/Action Scheduler 检测
+* 性能趋势记录
+* 媒体库只读体检
+* 高级缓存就绪检查
+* Heartbeat 控制与后台 AJAX 诊断
 * JSON 诊断报告导出
 
 == Safety ==
@@ -80,6 +86,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 3.0.0 补齐了哪些剩余优化？ =
+
+3.0.0 新增 Heartbeat 控制、admin-ajax 诊断、高级缓存就绪检查、媒体库只读体检、插件/主题体检、性能趋势记录、WooCommerce/Action Scheduler 检测，以及 feed/REST/XML-RPC 轻量控制。高级缓存 drop-in 只检测不自动写入，避免和服务器级缓存冲突。
 
 = 2.9.0 的数据库深度治理做了什么？ =
 

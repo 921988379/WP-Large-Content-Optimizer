@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.0.0 - 2026-05-26
+
+### Added
+
+- 新增 Heartbeat 控制，可保持默认、降频或在非编辑页禁用。
+- 新增前台 feed/REST/XML-RPC 轻量控制。
+- 新增 admin-ajax 诊断，统计登录/访客 AJAX Hook 与 Heartbeat 状态。
+- 新增高级缓存就绪检查，检测 `WP_CACHE` 与 `advanced-cache.php`，但不自动写入 drop-in。
+- 新增媒体库只读体检，展示附件总数、未挂载附件、缺少附件元数据。
+- 新增插件/主题体检，提示缓存/优化类插件冲突风险。
+- 新增性能趋势记录，保留最近 30 次诊断关键指标。
+- 新增 WooCommerce/Action Scheduler 检测，展示待执行/失败任务和 Hook TOP。
+
+### Safety
+
+- 高级缓存只做就绪检测，不自动接管 `advanced-cache.php`。
+- 媒体库体检只读，不自动删除未挂载附件。
+- REST API 访客限制和 XML-RPC 禁用默认关闭，避免影响业务接口。
+
 ## 2.9.0 - 2026-05-26
 
 ### Added

@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`2.9.0`
+`3.0.0`
 
 ## 后台入口
 
@@ -37,6 +37,28 @@ https://www.seoyh.net
 - autoload 优化器
 - 轻量页面缓存（默认关闭）
 - Redis/Object Cache 深度检测
+- REST/XML-RPC/feed 轻量控制
+- WooCommerce/Action Scheduler 检测
+- 插件/主题体检
+- 性能趋势记录
+- 媒体库只读体检
+- 高级缓存就绪检查
+- Heartbeat 控制与后台 AJAX 诊断
+
+## 3.0.0 综合治理
+
+3.0.0 补齐剩余低风险优化与诊断能力：
+
+- Heartbeat 控制：可保持默认、降频，或在非编辑页禁用
+- 前台瘦身：可移除 feed/REST 发现链接，可选禁用 XML-RPC、限制访客 REST API
+- admin-ajax 诊断：统计登录/访客 AJAX Hook，提示访客 admin-ajax 压力
+- 高级缓存就绪检查：检测 `WP_CACHE` 和 `advanced-cache.php`，不自动写入 drop-in
+- 媒体库体检：附件总数、未挂载附件、缺少附件元数据，只读展示
+- 插件/主题体检：识别缓存/优化类插件，提示功能冲突风险
+- 性能趋势记录：刷新诊断时保留最近 30 次关键指标
+- WooCommerce/Action Scheduler 检测：任务表、待执行/失败任务和 Hook TOP
+
+高级缓存 drop-in 仍保持保守策略：只检测、不自动接管，避免和服务器级缓存或现有缓存插件冲突。
 
 ## 数据库深度治理
 
