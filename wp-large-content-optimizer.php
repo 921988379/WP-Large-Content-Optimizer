@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.2.0
+ * Version: 3.3.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,10 +14,11 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.2.0';
+    const VERSION = '3.3.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
+    const PAGE_CACHE_STATS_OPTION = 'wplco_page_cache_stats';
     const GITHUB_OWNER = '921988379';
     const GITHUB_REPO = 'WP-Large-Content-Optimizer';
     const GITHUB_PLUGIN_FILE = 'wp-large-content-optimizer/wp-large-content-optimizer.php';
@@ -131,11 +132,28 @@ final class WP_Large_Content_Optimizer {
             'page_cache_singular' => 1,
             'page_cache_archive' => 1,
             'page_cache_mobile_variant' => 1,
+            'page_cache_stats_enabled' => 0,
+            'page_cache_exclude_paths' => '',
         );
     }
 
     private function settings() {
         return wp_parse_args(get_option(self::OPTION, array()), self::defaults());
+    }
+
+    private function sanitize_textarea_lines($value) {
+        $value = is_string($value) ? wp_unslash($value) : '';
+        $lines = preg_split('/\r\n|\r|\n/', $value);
+        $clean = array();
+        foreach ((array) $lines as $line) {
+            $line = trim(sanitize_text_field($line));
+            if ($line === '') {
+                continue;
+            }
+            $line = preg_replace('/[^A-Za-z0-9_\-\.\/\*\?=&:%]/', '', $line);
+            $clean[] = substr($line, 0, 180);
+        }
+        return implode("\n", array_slice(array_unique($clean), 0, 50));
     }
 
     public function admin_menu() {
@@ -580,6 +598,10 @@ final class WP_Large_Content_Optimizer {
             $result = $this->clean_duplicate_cron_events();
         } elseif ($action === 'clear_page_cache') {
             $result = $this->clear_page_cache();
+        } elseif ($action === 'clear_page_cache_stats') {
+            $result = $this->clear_page_cache_stats();
+        } elseif ($action === 'warm_page_cache') {
+            $result = $this->warm_page_cache();
         } elseif ($action === 'pause_cron_hook') {
             $result = $this->pause_cron_hook();
         } elseif ($action === 'resume_cron_hook') {
@@ -649,6 +671,8 @@ final class WP_Large_Content_Optimizer {
         $settings['page_cache_singular'] = empty($_POST['page_cache_singular']) ? 0 : 1;
         $settings['page_cache_archive'] = empty($_POST['page_cache_archive']) ? 0 : 1;
         $settings['page_cache_mobile_variant'] = empty($_POST['page_cache_mobile_variant']) ? 0 : 1;
+        $settings['page_cache_stats_enabled'] = empty($_POST['page_cache_stats_enabled']) ? 0 : 1;
+        $settings['page_cache_exclude_paths'] = $this->sanitize_textarea_lines($_POST['page_cache_exclude_paths'] ?? '');
         $new_page_cache_enabled = !empty($settings['page_cache_enabled']);
         if ($old_page_cache_enabled !== $new_page_cache_enabled || $old_page_cache_ttl !== intval($settings['page_cache_ttl'])) {
             $this->clear_page_cache();
@@ -1390,14 +1414,43 @@ final class WP_Large_Content_Optimizer {
                     <div><strong>缓存体积</strong><br><span class="wplco-metric"><?php echo esc_html($this->format_bytes($page_cache_report['bytes'])); ?></span></div>
                     <div><strong>最后生成</strong><br><span><?php echo $page_cache_report['last_generated'] ? esc_html(date_i18n('Y-m-d H:i:s', $page_cache_report['last_generated'])) : '暂无'; ?></span></div>
                     <div><strong>最后清理</strong><br><span><?php echo $page_cache_report['last_cleared'] ? esc_html(date_i18n('Y-m-d H:i:s', $page_cache_report['last_cleared'])) : '暂无'; ?></span></div>
+                    <div><strong>命中率</strong><br><span class="wplco-metric <?php echo $page_cache_report['stats']['hit_rate'] >= 50 ? 'wplco-ok' : 'wplco-warn'; ?>"><?php echo esc_html($page_cache_report['stats']['hit_rate']); ?>%</span><p class="wplco-small" style="margin:4px 0 0"><?php echo $page_cache_report['stats_enabled'] ? '统计已开启' : '统计未开启'; ?></p></div>
+                    <div><strong>预热候选</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($page_cache_report['warm_candidates'])); ?></span></div>
                 </div>
+                <?php if (!empty($page_cache_report['stats_enabled'])): ?>
+                    <h3>缓存观测</h3>
+                    <div class="wplco-env">
+                        <div><strong>HIT</strong><br><span class="wplco-metric wplco-ok"><?php echo esc_html(number_format_i18n($page_cache_report['stats']['hit'])); ?></span></div>
+                        <div><strong>MISS</strong><br><span class="wplco-metric wplco-warn"><?php echo esc_html(number_format_i18n($page_cache_report['stats']['miss'])); ?></span></div>
+                        <div><strong>BYPASS</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($page_cache_report['stats']['bypass'])); ?></span></div>
+                        <div><strong>已写入</strong><br><span class="wplco-metric wplco-ok"><?php echo esc_html(number_format_i18n($page_cache_report['stats']['stored'])); ?></span></div>
+                        <div><strong>跳过写入</strong><br><span class="wplco-metric <?php echo $page_cache_report['stats']['store_skip'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($page_cache_report['stats']['store_skip'])); ?></span></div>
+                        <div><strong>最后统计</strong><br><span><?php echo $page_cache_report['stats']['updated'] ? esc_html(date_i18n('Y-m-d H:i:s', $page_cache_report['stats']['updated'])) : '暂无'; ?></span></div>
+                    </div>
+                    <?php if (!empty($page_cache_report['stats']['reasons'])): ?>
+                        <h3>MISS / BYPASS 原因 TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>原因</th><th>次数</th></tr></thead><tbody><?php foreach ($page_cache_report['stats']['reasons'] as $row): ?><tr><td><code><?php echo esc_html($row['reason']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
+                    <?php if (!empty($page_cache_report['stats']['samples'])): ?>
+                        <h3>最近缓存 URL 样本</h3>
+                        <table class="wplco-table"><thead><tr><th>时间</th><th>状态</th><th>变体</th><th>URL</th></tr></thead><tbody><?php foreach ($page_cache_report['stats']['samples'] as $row): ?><tr><td><?php echo esc_html(date_i18n('Y-m-d H:i:s', intval($row['time']))); ?></td><td><code><?php echo esc_html($row['status']); ?></code></td><td><?php echo esc_html($row['variant']); ?></td><td><code><?php echo esc_html($row['url']); ?></code></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
+                <?php endif; ?>
+                <?php if (!empty($page_cache_report['exclude_patterns'])): ?>
+                    <h3>当前排除规则</h3>
+                    <p class="wplco-small"><code><?php echo esc_html(implode('</code> <code>', $page_cache_report['exclude_patterns'])); ?></code></p>
+                <?php endif; ?>
                 <?php if (!empty($page_cache_report['recommendations'])): ?>
                     <h3>建议</h3>
                     <ul class="wplco-list">
                         <?php foreach ($page_cache_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?>
                     </ul>
                 <?php endif; ?>
-                <p><?php $this->action_button('clear_page_cache', '清空页面缓存', '确定清空本插件生成的页面缓存？不会删除文章和数据库数据。'); ?></p>
+                <p>
+                    <?php $this->action_button('clear_page_cache', '清空页面缓存', '确定清空本插件生成的页面缓存？不会删除文章和数据库数据。'); ?>
+                    <?php $this->action_button('clear_page_cache_stats', '清空命中统计', '确定清空页面缓存命中统计？不会删除缓存文件。'); ?>
+                    <?php $this->action_button('warm_page_cache', '手动预热缓存', '将请求首页、最新文章/页面和热门分类标签以生成缓存。确定继续？'); ?>
+                </p>
             </div>
 
             <div class="wplco-two">
@@ -1623,6 +1676,8 @@ final class WP_Large_Content_Optimizer {
                     <label><input type="checkbox" name="page_cache_singular" value="1" <?php checked($settings['page_cache_singular']); ?>> 缓存文章页/页面</label>
                     <label><input type="checkbox" name="page_cache_archive" value="1" <?php checked($settings['page_cache_archive']); ?>> 缓存分类/标签/归档页</label>
                     <label><input type="checkbox" name="page_cache_mobile_variant" value="1" <?php checked($settings['page_cache_mobile_variant']); ?>> 移动端与 PC 分开缓存 <span class="wplco-small">主题移动端输出不同时建议开启。</span></label>
+                    <label><input type="checkbox" name="page_cache_stats_enabled" value="1" <?php checked($settings['page_cache_stats_enabled']); ?>> 开启页面缓存命中统计 <span class="wplco-small">记录 HIT/MISS/BYPASS 计数和少量 URL 样本，默认关闭。</span></label>
+                    <label>缓存排除路径/模式：<br><textarea name="page_cache_exclude_paths" rows="4" style="width:100%;max-width:680px" placeholder="/checkout/*&#10;/cart/*&#10;/account/*"><?php echo esc_textarea($settings['page_cache_exclude_paths']); ?></textarea><br><span class="wplco-small">每行一条，支持 <code>*</code> 通配符。只匹配 URL 路径，不含域名。</span></label>
                     <hr>
                     <label><input type="checkbox" name="cron_enabled" value="1" <?php checked($settings['cron_enabled']); ?>> 开启每日自动维护</label>
                     <label><input type="checkbox" name="cron_clean_revisions" value="1" <?php checked($settings['cron_clean_revisions']); ?>> 自动清理修订版本</label>
@@ -1975,48 +2030,162 @@ PHP;
         return md5($this->page_cache_variant() . '|' . $this->page_cache_url());
     }
 
-    private function is_page_cache_request_allowed() {
+    private function page_cache_exclude_patterns() {
         $settings = $this->settings();
-        if (empty($settings['page_cache_enabled'])) {
-            return false;
-        }
-        if (is_admin() || wp_doing_ajax() || wp_doing_cron() || (defined('REST_REQUEST') && REST_REQUEST)) {
-            return false;
-        }
-        $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper(sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD']))) : 'GET';
-        if ($method !== 'GET') {
-            return false;
-        }
-        if (is_user_logged_in() || is_preview() || is_search() || is_feed() || is_404() || is_trackback() || is_robots() || is_embed()) {
-            return false;
-        }
-        if (!empty($_GET)) {
-            return false;
-        }
-        foreach ($_COOKIE as $name => $value) {
-            if (preg_match('/^(wordpress_logged_in_|wordpress_sec_|wp-postpass_|comment_author_|woocommerce_|wp_woocommerce_session_)/', (string) $name)) {
-                return false;
+        $raw = isset($settings['page_cache_exclude_paths']) ? (string) $settings['page_cache_exclude_paths'] : '';
+        $patterns = array();
+        foreach (preg_split('/\r\n|\r|\n/', $raw) as $line) {
+            $line = trim($line);
+            if ($line !== '') {
+                $patterns[] = $line;
             }
         }
-        if ((is_front_page() || is_home()) && !empty($settings['page_cache_home'])) {
-            return true;
-        }
-        if (is_singular() && !empty($settings['page_cache_singular'])) {
-            if (post_password_required()) {
-                return false;
+        return array_slice(array_unique($patterns), 0, 50);
+    }
+
+    private function page_cache_url_path() {
+        $uri = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '/';
+        $path = parse_url($uri, PHP_URL_PATH);
+        return $path ? $path : '/';
+    }
+
+    private function is_page_cache_path_excluded() {
+        $path = $this->page_cache_url_path();
+        foreach ($this->page_cache_exclude_patterns() as $pattern) {
+            if ($pattern === '') {
+                continue;
             }
-            return true;
-        }
-        if ((is_category() || is_tag() || is_tax() || is_date() || is_author() || is_post_type_archive()) && !empty($settings['page_cache_archive'])) {
-            return true;
+            $quoted = preg_quote($pattern, '#');
+            $regex = '#^' . str_replace('\\*', '.*', $quoted) . '#i';
+            if (@preg_match($regex, $path)) {
+                if (preg_match($regex, $path)) {
+                    return true;
+                }
+            } elseif (stripos($path, $pattern) === 0) {
+                return true;
+            }
         }
         return false;
     }
 
+    private function page_cache_request_bypass_reason() {
+        $settings = $this->settings();
+        if (empty($settings['page_cache_enabled'])) {
+            return 'disabled';
+        }
+        if (is_admin()) {
+            return 'admin';
+        }
+        if (wp_doing_ajax()) {
+            return 'ajax';
+        }
+        if (wp_doing_cron()) {
+            return 'cron';
+        }
+        if (defined('REST_REQUEST') && REST_REQUEST) {
+            return 'rest';
+        }
+        $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper(sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD']))) : 'GET';
+        if ($method !== 'GET') {
+            return 'method';
+        }
+        if (is_user_logged_in()) {
+            return 'logged_in';
+        }
+        if (is_preview()) {
+            return 'preview';
+        }
+        if (is_search()) {
+            return 'search';
+        }
+        if (is_feed()) {
+            return 'feed';
+        }
+        if (is_404()) {
+            return '404';
+        }
+        if (is_trackback() || is_robots() || is_embed()) {
+            return 'special_request';
+        }
+        if (!empty($_GET)) {
+            return 'query_string';
+        }
+        foreach ($_COOKIE as $name => $value) {
+            if (preg_match('/^(wordpress_logged_in_|wordpress_sec_|wp-postpass_|comment_author_|woocommerce_|wp_woocommerce_session_)/', (string) $name)) {
+                return 'cookie';
+            }
+        }
+        if ($this->is_page_cache_path_excluded()) {
+            return 'excluded_path';
+        }
+        if ((is_front_page() || is_home()) && !empty($settings['page_cache_home'])) {
+            return '';
+        }
+        if (is_singular() && !empty($settings['page_cache_singular'])) {
+            if (post_password_required()) {
+                return 'password_protected';
+            }
+            return '';
+        }
+        if ((is_category() || is_tag() || is_tax() || is_date() || is_author() || is_post_type_archive()) && !empty($settings['page_cache_archive'])) {
+            return '';
+        }
+        return 'unsupported_template';
+    }
+
+    private function is_page_cache_request_allowed() {
+        return $this->page_cache_request_bypass_reason() === '';
+    }
+
+    private function record_page_cache_stat($status, $reason = '', $key = '') {
+        $settings = $this->settings();
+        if (empty($settings['page_cache_stats_enabled']) || empty($settings['page_cache_enabled'])) {
+            return;
+        }
+        $status = sanitize_key($status);
+        $reason = $reason ? sanitize_key($reason) : '';
+        $stats = get_option(self::PAGE_CACHE_STATS_OPTION, array());
+        if (!is_array($stats)) {
+            $stats = array();
+        }
+        $now = time();
+        $stats['started'] = isset($stats['started']) ? intval($stats['started']) : $now;
+        $stats['updated'] = $now;
+        foreach (array('hit','miss','bypass','stored','store_skip','advanced_hit') as $name) {
+            $stats[$name] = isset($stats[$name]) ? intval($stats[$name]) : 0;
+        }
+        if (isset($stats[$status])) {
+            $stats[$status]++;
+        }
+        if ($reason) {
+            if (empty($stats['reasons']) || !is_array($stats['reasons'])) {
+                $stats['reasons'] = array();
+            }
+            $stats['reasons'][$reason] = isset($stats['reasons'][$reason]) ? intval($stats['reasons'][$reason]) + 1 : 1;
+        }
+        if (!in_array($status, array('bypass', 'store_skip'), true)) {
+            if (empty($stats['samples']) || !is_array($stats['samples'])) {
+                $stats['samples'] = array();
+            }
+            array_unshift($stats['samples'], array(
+                'time' => $now,
+                'status' => $status,
+                'url' => $this->page_cache_url(),
+                'variant' => $this->page_cache_variant(),
+                'key' => $key,
+            ));
+            $stats['samples'] = array_slice($stats['samples'], 0, 20);
+        }
+        update_option(self::PAGE_CACHE_STATS_OPTION, $stats, false);
+    }
+
     public function maybe_serve_page_cache() {
-        if (!$this->is_page_cache_request_allowed()) {
+        $bypass_reason = $this->page_cache_request_bypass_reason();
+        if ($bypass_reason !== '') {
+            $this->record_page_cache_stat('bypass', $bypass_reason);
             if (!headers_sent()) {
                 header('X-WLCO-Cache: BYPASS');
+                header('X-WLCO-Cache-Reason: ' . $bypass_reason);
             }
             return;
         }
@@ -2025,6 +2194,7 @@ PHP;
         $key = $this->page_cache_key();
         $file = $this->page_cache_file_for_key($key);
         if (is_readable($file) && (time() - filemtime($file)) <= $ttl) {
+            $this->record_page_cache_stat('hit', '', $key);
             if (!headers_sent()) {
                 header('Content-Type: text/html; charset=' . get_bloginfo('charset'));
                 header('X-WLCO-Cache: HIT');
@@ -2033,6 +2203,7 @@ PHP;
             readfile($file);
             exit;
         }
+        $this->record_page_cache_stat('miss', 'not_found_or_expired', $key);
         if (!headers_sent()) {
             header('X-WLCO-Cache: MISS');
             header('X-WLCO-Cache-Key: ' . $key);
@@ -2058,21 +2229,25 @@ PHP;
 
     private function store_page_cache_html($html) {
         if (!is_string($html) || strlen($html) < 512 || stripos($html, '<html') === false) {
+            $this->record_page_cache_stat('store_skip', 'invalid_html', $this->page_cache_key);
             return false;
         }
         if (function_exists('http_response_code')) {
             $code = http_response_code();
             if ($code && intval($code) !== 200) {
+                $this->record_page_cache_stat('store_skip', 'status_' . intval($code), $this->page_cache_key);
                 return false;
             }
         }
         foreach (headers_list() as $header) {
             if (stripos($header, 'Set-Cookie:') === 0 || (stripos($header, 'Content-Type:') === 0 && stripos($header, 'text/html') === false)) {
+                $this->record_page_cache_stat('store_skip', 'unsafe_header', $this->page_cache_key);
                 return false;
             }
         }
         $dir = dirname($this->page_cache_file);
         if (!$this->ensure_page_cache_dir($dir) || !is_writable($dir)) {
+            $this->record_page_cache_stat('store_skip', 'dir_not_writable', $this->page_cache_key);
             return false;
         }
         $meta = "\n<!-- WLCO page cache: " . esc_html(gmdate('c', $this->page_cache_started)) . ' key=' . esc_html($this->page_cache_key) . " -->\n";
@@ -2082,6 +2257,7 @@ PHP;
                 'last_generated' => time(),
                 'last_generated_key' => $this->page_cache_key,
             ));
+            $this->record_page_cache_stat('stored', '', $this->page_cache_key);
             return true;
         }
         return false;
@@ -2114,6 +2290,86 @@ PHP;
 
     public function flush_page_cache_on_content_change() {
         $this->clear_page_cache(false);
+    }
+
+    private function clear_page_cache_stats() {
+        delete_option(self::PAGE_CACHE_STATS_OPTION);
+        return array('type' => 'success', 'message' => '页面缓存命中统计已清空。');
+    }
+
+    private function page_cache_warm_urls() {
+        $settings = $this->settings();
+        $urls = array(home_url('/'));
+        if (!empty($settings['page_cache_singular'])) {
+            $posts = get_posts(array(
+                'post_type' => array('post', 'page'),
+                'post_status' => 'publish',
+                'posts_per_page' => 20,
+                'orderby' => 'modified',
+                'order' => 'DESC',
+                'fields' => 'ids',
+                'no_found_rows' => true,
+                'update_post_meta_cache' => false,
+                'update_post_term_cache' => false,
+            ));
+            foreach ($posts as $post_id) {
+                $url = get_permalink($post_id);
+                if ($url) {
+                    $urls[] = $url;
+                }
+            }
+        }
+        if (!empty($settings['page_cache_archive'])) {
+            $terms = get_terms(array(
+                'taxonomy' => array('category', 'post_tag'),
+                'hide_empty' => true,
+                'number' => 10,
+                'orderby' => 'count',
+                'order' => 'DESC',
+            ));
+            if (!is_wp_error($terms)) {
+                foreach ($terms as $term) {
+                    $url = get_term_link($term);
+                    if (!is_wp_error($url)) {
+                        $urls[] = $url;
+                    }
+                }
+            }
+        }
+        $urls = array_values(array_unique(array_filter($urls)));
+        return array_slice($urls, 0, 30);
+    }
+
+    private function warm_page_cache() {
+        $settings = $this->settings();
+        if (empty($settings['page_cache_enabled'])) {
+            return array('type' => 'error', 'message' => '页面缓存未开启，无法预热。');
+        }
+        $urls = $this->page_cache_warm_urls();
+        $ok = 0;
+        $fail = 0;
+        foreach ($urls as $url) {
+            $response = wp_remote_get($url, array(
+                'timeout' => 8,
+                'redirection' => 2,
+                'headers' => array(
+                    'User-Agent' => 'WLCO-Cache-Warmer/' . self::VERSION,
+                    'Cache-Control' => 'no-cache',
+                ),
+            ));
+            if (is_wp_error($response)) {
+                $fail++;
+                continue;
+            }
+            $code = intval(wp_remote_retrieve_response_code($response));
+            if ($code >= 200 && $code < 400) {
+                $ok++;
+            } else {
+                $fail++;
+            }
+        }
+        delete_transient('wplco_diagnostic_report');
+        return array('type' => $ok ? 'success' : 'error', 'message' => '页面缓存预热完成：成功请求 ' . number_format_i18n($ok) . ' 个 URL，失败 ' . number_format_i18n($fail) . ' 个。');
     }
 
     private function clear_page_cache($notice = true) {
@@ -2174,6 +2430,24 @@ PHP;
         if (!is_array($meta)) {
             $meta = array();
         }
+        $stats = get_option(self::PAGE_CACHE_STATS_OPTION, array());
+        if (!is_array($stats)) {
+            $stats = array();
+        }
+        $hit = isset($stats['hit']) ? intval($stats['hit']) : 0;
+        $miss = isset($stats['miss']) ? intval($stats['miss']) : 0;
+        $stored = isset($stats['stored']) ? intval($stats['stored']) : 0;
+        $bypass = isset($stats['bypass']) ? intval($stats['bypass']) : 0;
+        $store_skip = isset($stats['store_skip']) ? intval($stats['store_skip']) : 0;
+        $cacheable = $hit + $miss;
+        $hit_rate = $cacheable > 0 ? round(($hit / $cacheable) * 100, 1) : 0;
+        $reasons = isset($stats['reasons']) && is_array($stats['reasons']) ? $stats['reasons'] : array();
+        arsort($reasons);
+        $reason_rows = array();
+        foreach (array_slice($reasons, 0, 8, true) as $reason => $count) {
+            $reason_rows[] = array('reason' => $reason, 'count' => intval($count));
+        }
+        $sample_rows = isset($stats['samples']) && is_array($stats['samples']) ? array_slice($stats['samples'], 0, 10) : array();
         $recommendations = array();
         if (empty($settings['page_cache_enabled'])) {
             $recommendations[] = '当前未开启本插件页面缓存；如果没有使用服务器级页面缓存，可在“设置”里开启。';
@@ -2181,6 +2455,9 @@ PHP;
             $recommendations[] = '页面缓存已开启。发布、删除文章或评论状态变化时会自动清空缓存，避免旧内容长期保留。';
             $recommendations[] = '当前为轻量页面缓存模式，命中点在 template_redirect；如需更高收益，后续可升级 advanced-cache 高级模式。';
             $recommendations[] = '如服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、WP Rocket 等页面缓存，建议二选一，避免重复缓存。';
+            if (!empty($settings['page_cache_stats_enabled']) && $cacheable >= 20 && $hit_rate < 50) {
+                $recommendations[] = '当前缓存命中率偏低，建议查看 MISS/BYPASS 原因和排除规则，确认缓存是否被查询参数、Cookie 或模板条件绕过。';
+            }
         }
         if (!is_dir($dir)) {
             $recommendations[] = '缓存目录尚未生成，第一次有访客访问可缓存页面后会自动创建。';
@@ -2198,7 +2475,21 @@ PHP;
             'last_generated' => isset($meta['last_generated']) ? intval($meta['last_generated']) : 0,
             'last_cleared' => isset($meta['last_cleared']) ? intval($meta['last_cleared']) : 0,
             'dir' => $dir,
-            'recommendations' => array_slice($recommendations, 0, 6),
+            'stats_enabled' => !empty($settings['page_cache_stats_enabled']),
+            'stats' => array(
+                'hit' => $hit,
+                'miss' => $miss,
+                'bypass' => $bypass,
+                'stored' => $stored,
+                'store_skip' => $store_skip,
+                'hit_rate' => $hit_rate,
+                'updated' => isset($stats['updated']) ? intval($stats['updated']) : 0,
+                'reasons' => $reason_rows,
+                'samples' => $sample_rows,
+            ),
+            'exclude_patterns' => $this->page_cache_exclude_patterns(),
+            'warm_candidates' => count($this->page_cache_warm_urls()),
+            'recommendations' => array_slice($recommendations, 0, 8),
         );
     }
 

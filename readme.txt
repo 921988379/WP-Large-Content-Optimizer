@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 3.2.0
+Stable tag: 3.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -46,6 +46,8 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 趋势记录清空工具
 * 媒体库问题附件样本审查
 * Cron Hook 暂停/恢复与按 Hook 删除计划事件
+* 页面缓存手动预热与排除规则
+* 页面缓存 HIT/MISS/BYPASS 命中统计
 * 后台列表筛选器精简模式
 * 慢查询 EXPLAIN 采样
 * 高级缓存 Drop-in 安全安装/卸载
@@ -92,6 +94,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 3.3.0 的页面缓存统计会不会拖慢网站？ =
+
+默认关闭。开启后只记录聚合计数、原因 TOP 和少量 URL 样本，适合短期诊断缓存命中情况；如果已有服务器级缓存或不需要观测，可以保持关闭。
 
 = 3.2.0 的 Cron 暂停会删除任务吗？ =
 
