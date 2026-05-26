@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.7.1
+Stable tag: 2.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -37,6 +37,7 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 数据库维护日志
 * WP-Cron 与采集任务检测
 * 后台文章列表查询缓存
+* 后台列表 AJAX 延迟统计
 * 轻量页面缓存（默认关闭）
 * Redis/Object Cache 深度检测
 * JSON 诊断报告导出
@@ -77,6 +78,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 后台列表 AJAX 延迟统计有什么用？ =
+
+2.8.0 新增后台文章列表 AJAX 延迟统计：月份筛选和精确总数可先从首屏移除，页面打开后异步计算并缓存，减少大内容站打开文章列表时的同步阻塞。建议配合“禁用月份下拉统计”和“禁用精确总数统计”使用。
 
 = 2.7.1 页面缓存做了哪些稳定增强？ =
 

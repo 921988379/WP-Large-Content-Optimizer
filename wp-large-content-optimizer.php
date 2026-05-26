@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 2.7.1
+ * Version: 2.8.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.7.1';
+    const VERSION = '2.8.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -42,10 +42,13 @@ final class WP_Large_Content_Optimizer {
         add_action('admin_init', array($this, 'handle_post_actions'));
         add_action('wp_ajax_wplco_queue_start', array($this, 'ajax_queue_start'));
         add_action('wp_ajax_wplco_queue_step', array($this, 'ajax_queue_step'));
+        add_action('wp_ajax_wplco_admin_months', array($this, 'ajax_admin_months'));
+        add_action('wp_ajax_wplco_admin_found_posts', array($this, 'ajax_admin_found_posts'));
         add_filter('wp_revisions_to_keep', array($this, 'limit_revisions'), 10, 2);
         add_filter('manage_posts_columns', array($this, 'simplify_post_columns'), 999);
         add_filter('manage_pages_columns', array($this, 'simplify_post_columns'), 999);
         add_action('pre_get_posts', array($this, 'admin_list_fast_mode_query'), 20);
+        add_action('admin_footer-edit.php', array($this, 'render_admin_lazy_stats_script'));
         add_filter('months_dropdown_results', array($this, 'admin_list_disable_months_dropdown'), 20, 2);
         add_filter('found_posts', array($this, 'admin_list_disable_found_posts'), 20, 2);
         add_filter('posts_pre_query', array($this, 'admin_query_cache_pre'), 10, 2);
@@ -101,6 +104,9 @@ final class WP_Large_Content_Optimizer {
             'admin_fast_disable_found_rows' => 0,
             'admin_query_cache' => 0,
             'admin_query_cache_ttl' => 120,
+            'admin_ajax_months' => 0,
+            'admin_ajax_found_rows' => 0,
+            'admin_stats_cache_ttl' => 600,
             'frontend_disable_emoji' => 1,
             'frontend_disable_embeds' => 0,
             'frontend_disable_dashicons' => 0,
@@ -301,6 +307,211 @@ final class WP_Large_Content_Optimizer {
             }
         }
         delete_option('wplco_admin_query_cache_keys');
+        $this->flush_admin_lazy_stats_cache();
+    }
+
+    private function admin_lazy_stats_enabled() {
+        $settings = $this->settings();
+        return !empty($settings['admin_fast_mode']) && (!empty($settings['admin_ajax_months']) || !empty($settings['admin_ajax_found_rows']));
+    }
+
+    private function admin_lazy_stats_cache_ttl() {
+        $settings = $this->settings();
+        return min(3600, max(60, intval($settings['admin_stats_cache_ttl'])));
+    }
+
+    private function admin_lazy_stats_cache_set($key, $value) {
+        set_transient($key, $value, $this->admin_lazy_stats_cache_ttl());
+        $keys = get_option('wplco_admin_lazy_stats_cache_keys', array());
+        if (!is_array($keys)) {
+            $keys = array();
+        }
+        $keys[$key] = time();
+        $keys = array_slice($keys, -200, null, true);
+        update_option('wplco_admin_lazy_stats_cache_keys', $keys, false);
+    }
+
+    private function flush_admin_lazy_stats_cache() {
+        $keys = get_option('wplco_admin_lazy_stats_cache_keys', array());
+        if (is_array($keys)) {
+            foreach (array_keys($keys) as $key) {
+                delete_transient($key);
+            }
+        }
+        delete_option('wplco_admin_lazy_stats_cache_keys');
+    }
+
+    private function admin_lazy_request_args() {
+        $post_type = isset($_POST['post_type']) ? sanitize_key(wp_unslash($_POST['post_type'])) : 'post';
+        if (!in_array($post_type, array('post', 'page'), true)) {
+            $post_type = 'post';
+        }
+        $args = array(
+            'post_type' => $post_type,
+            'post_status' => isset($_POST['post_status']) ? sanitize_key(wp_unslash($_POST['post_status'])) : '',
+            's' => isset($_POST['s']) ? sanitize_text_field(wp_unslash($_POST['s'])) : '',
+            'm' => isset($_POST['m']) ? preg_replace('/[^0-9]/', '', (string) wp_unslash($_POST['m'])) : '',
+            'author' => isset($_POST['author']) ? intval($_POST['author']) : 0,
+            'cat' => isset($_POST['cat']) ? intval($_POST['cat']) : 0,
+        );
+        return $args;
+    }
+
+    public function ajax_admin_months() {
+        if (!current_user_can('edit_posts')) {
+            wp_send_json_error(array('message' => '权限不足。'), 403);
+        }
+        check_ajax_referer('wplco_admin_lazy_stats', 'nonce');
+        $settings = $this->settings();
+        if (empty($settings['admin_ajax_months'])) {
+            wp_send_json_error(array('message' => '未启用 AJAX 月份统计。'), 400);
+        }
+        $args = $this->admin_lazy_request_args();
+        $key = 'wplco_admin_months_' . md5(wp_json_encode($args));
+        $cached = get_transient($key);
+        if (is_array($cached)) {
+            $cached['cached'] = true;
+            wp_send_json_success($cached);
+        }
+        global $wpdb, $wp_locale;
+        $where = $wpdb->prepare("post_type = %s AND post_status NOT IN ('auto-draft','trash') AND post_date <> '0000-00-00 00:00:00'", $args['post_type']);
+        if ($args['post_status'] !== '') {
+            $where .= $wpdb->prepare(' AND post_status = %s', $args['post_status']);
+        }
+        $rows = $wpdb->get_results("SELECT YEAR(post_date) AS year, MONTH(post_date) AS month, COUNT(ID) AS posts FROM {$wpdb->posts} WHERE {$where} GROUP BY YEAR(post_date), MONTH(post_date) ORDER BY post_date DESC LIMIT 60", ARRAY_A);
+        $months = array();
+        foreach ((array) $rows as $row) {
+            $year = intval($row['year']);
+            $month = intval($row['month']);
+            $months[] = array(
+                'value' => sprintf('%04d%02d', $year, $month),
+                'label' => sprintf('%s %d', $wp_locale->get_month($month), $year),
+                'count' => intval($row['posts']),
+            );
+        }
+        $payload = array('months' => $months, 'cached' => false, 'generated_at' => current_time('mysql'));
+        $this->admin_lazy_stats_cache_set($key, $payload);
+        wp_send_json_success($payload);
+    }
+
+    public function ajax_admin_found_posts() {
+        if (!current_user_can('edit_posts')) {
+            wp_send_json_error(array('message' => '权限不足。'), 403);
+        }
+        check_ajax_referer('wplco_admin_lazy_stats', 'nonce');
+        $settings = $this->settings();
+        if (empty($settings['admin_ajax_found_rows'])) {
+            wp_send_json_error(array('message' => '未启用 AJAX 精确总数统计。'), 400);
+        }
+        $args = $this->admin_lazy_request_args();
+        $key = 'wplco_admin_found_' . md5(wp_json_encode($args));
+        $cached = get_transient($key);
+        if (is_array($cached)) {
+            $cached['cached'] = true;
+            wp_send_json_success($cached);
+        }
+        $query_args = array(
+            'post_type' => $args['post_type'],
+            'post_status' => $args['post_status'] !== '' ? $args['post_status'] : 'any',
+            'posts_per_page' => 1,
+            'fields' => 'ids',
+            'no_found_rows' => false,
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
+        );
+        $use_title_search = !empty($settings['admin_fast_title_search']) && $args['s'] !== '';
+        if ($args['s'] !== '' && !$use_title_search) {
+            $query_args['s'] = $args['s'];
+        }
+        if ($use_title_search) {
+            $query_args['wplco_title_search'] = $args['s'];
+            add_filter('posts_where', array($this, 'admin_title_search_where'), 20, 2);
+        }
+        if ($args['m'] !== '') {
+            $query_args['m'] = $args['m'];
+        }
+        if ($args['author'] > 0) {
+            $query_args['author'] = $args['author'];
+        }
+        if ($args['cat'] > 0 && $args['post_type'] === 'post') {
+            $query_args['cat'] = $args['cat'];
+        }
+        $q = new WP_Query($query_args);
+        if ($use_title_search) {
+            remove_filter('posts_where', array($this, 'admin_title_search_where'), 20);
+        }
+        $total = intval($q->found_posts);
+        $per_page = isset($_POST['per_page']) ? max(1, min(200, intval($_POST['per_page']))) : min(200, max(10, intval($settings['admin_fast_per_page'])));
+        $payload = array(
+            'total' => $total,
+            'pages' => $per_page > 0 ? (int) ceil($total / $per_page) : 0,
+            'per_page' => $per_page,
+            'cached' => false,
+            'generated_at' => current_time('mysql'),
+        );
+        $this->admin_lazy_stats_cache_set($key, $payload);
+        wp_send_json_success($payload);
+    }
+
+    public function render_admin_lazy_stats_script() {
+        if (!$this->is_admin_edit_posts_screen() || !$this->admin_lazy_stats_enabled()) {
+            return;
+        }
+        $settings = $this->settings();
+        $screen = get_current_screen();
+        $post_type = isset($_GET['post_type']) ? sanitize_key(wp_unslash($_GET['post_type'])) : 'post';
+        $data = array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('wplco_admin_lazy_stats'),
+            'postType' => $post_type,
+            'postStatus' => isset($_GET['post_status']) ? sanitize_key(wp_unslash($_GET['post_status'])) : '',
+            's' => isset($_GET['s']) ? sanitize_text_field(wp_unslash($_GET['s'])) : '',
+            'm' => isset($_GET['m']) ? preg_replace('/[^0-9]/', '', (string) wp_unslash($_GET['m'])) : '',
+            'author' => isset($_GET['author']) ? intval($_GET['author']) : 0,
+            'cat' => isset($_GET['cat']) ? intval($_GET['cat']) : 0,
+            'perPage' => min(200, max(10, intval($settings['admin_fast_per_page']))),
+            'months' => !empty($settings['admin_ajax_months']),
+            'foundRows' => !empty($settings['admin_ajax_found_rows']),
+        );
+        ?>
+        <script>
+        (function(){
+            var cfg=<?php echo wp_json_encode($data); ?>;
+            function post(action, extra){
+                var body=new URLSearchParams();
+                body.set('action', action); body.set('nonce', cfg.nonce);
+                body.set('post_type', cfg.postType); body.set('post_status', cfg.postStatus || ''); body.set('s', cfg.s || ''); body.set('m', cfg.m || ''); body.set('author', cfg.author || 0); body.set('cat', cfg.cat || 0); body.set('per_page', cfg.perPage || 50);
+                if(extra){Object.keys(extra).forEach(function(k){body.set(k, extra[k]);});}
+                return fetch(cfg.ajaxUrl,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},body:body.toString()}).then(function(r){return r.json();});
+            }
+            function currentUrlWith(name,value){
+                var url=new URL(window.location.href); if(value){url.searchParams.set(name,value);}else{url.searchParams.delete(name);} url.searchParams.delete('paged'); return url.toString();
+            }
+            if(cfg.months){
+                var actions=document.querySelector('.tablenav.top .alignleft.actions') || document.querySelector('.tablenav .alignleft.actions');
+                if(actions && !actions.querySelector('select[name="m"]')){
+                    var select=document.createElement('select'); select.name='m'; select.id='filter-by-date'; select.innerHTML='<option value="">月份加载中…</option>'; actions.insertBefore(select, actions.firstChild);
+                    post('wplco_admin_months').then(function(res){
+                        if(!res || !res.success){select.innerHTML='<option value="">月份加载失败</option>'; return;}
+                        var html='<option value="">全部日期</option>';
+                        (res.data.months||[]).forEach(function(row){html+='<option value="'+row.value+'"'+(cfg.m===row.value?' selected':'')+'>'+row.label+' ('+row.count+')</option>';});
+                        select.innerHTML=html;
+                        select.addEventListener('change', function(){window.location.href=currentUrlWith('m', select.value);});
+                    }).catch(function(){select.innerHTML='<option value="">月份加载失败</option>';});
+                }
+            }
+            if(cfg.foundRows){
+                var nums=document.querySelectorAll('.displaying-num');
+                nums.forEach(function(n){n.setAttribute('data-wplco-original', n.textContent); n.textContent='精确总数计算中…';});
+                post('wplco_admin_found_posts').then(function(res){
+                    if(!res || !res.success){nums.forEach(function(n){n.textContent=n.getAttribute('data-wplco-original') || '总数加载失败';}); return;}
+                    var total=Number(res.data.total||0).toLocaleString(); var pages=Number(res.data.pages||0).toLocaleString();
+                    nums.forEach(function(n){n.textContent=total+' 个项目，共 '+pages+' 页';});
+                }).catch(function(){nums.forEach(function(n){n.textContent=n.getAttribute('data-wplco-original') || '总数加载失败';});});
+            }
+        })();
+        </script>
+        <?php
     }
 
 
@@ -380,6 +591,9 @@ final class WP_Large_Content_Optimizer {
         $settings['admin_fast_disable_found_rows'] = empty($_POST['admin_fast_disable_found_rows']) ? 0 : 1;
         $settings['admin_query_cache'] = empty($_POST['admin_query_cache']) ? 0 : 1;
         $settings['admin_query_cache_ttl'] = min(600, max(30, intval($_POST['admin_query_cache_ttl'] ?? 120)));
+        $settings['admin_ajax_months'] = empty($_POST['admin_ajax_months']) ? 0 : 1;
+        $settings['admin_ajax_found_rows'] = empty($_POST['admin_ajax_found_rows']) ? 0 : 1;
+        $settings['admin_stats_cache_ttl'] = min(3600, max(60, intval($_POST['admin_stats_cache_ttl'] ?? 600)));
         $settings['frontend_disable_emoji'] = empty($_POST['frontend_disable_emoji']) ? 0 : 1;
         $settings['frontend_disable_embeds'] = empty($_POST['frontend_disable_embeds']) ? 0 : 1;
         $settings['frontend_disable_dashicons'] = empty($_POST['frontend_disable_dashicons']) ? 0 : 1;
@@ -1121,6 +1335,9 @@ final class WP_Large_Content_Optimizer {
                     <label><input type="checkbox" name="admin_fast_disable_found_rows" value="1" <?php checked($settings['admin_fast_disable_found_rows']); ?>> 禁用精确总数统计 <span class="wplco-small">速度更快，但分页总数可能不准确；默认关闭。</span></label>
                     <label><input type="checkbox" name="admin_query_cache" value="1" <?php checked($settings['admin_query_cache']); ?>> 启用后台文章列表查询缓存 <span class="wplco-small">缓存相同筛选条件下的文章 ID 列表；文章更新/删除后自动清理。默认关闭。</span></label>
                     <label>查询缓存时间：<input class="wplco-number" type="number" name="admin_query_cache_ttl" min="30" max="600" value="<?php echo esc_attr($settings['admin_query_cache_ttl']); ?>"> 秒 <span class="wplco-small">建议 60-300 秒。</span></label>
+                    <label><input type="checkbox" name="admin_ajax_months" value="1" <?php checked($settings['admin_ajax_months']); ?>> AJAX 延迟加载月份筛选 <span class="wplco-small">首屏不跑月份聚合，页面打开后异步加载并缓存。</span></label>
+                    <label><input type="checkbox" name="admin_ajax_found_rows" value="1" <?php checked($settings['admin_ajax_found_rows']); ?>> AJAX 延迟加载精确总数 <span class="wplco-small">配合“禁用精确总数统计”使用，首屏先快，随后异步显示总数。</span></label>
+                    <label>延迟统计缓存时间：<input class="wplco-number" type="number" name="admin_stats_cache_ttl" min="60" max="3600" value="<?php echo esc_attr($settings['admin_stats_cache_ttl']); ?>"> 秒 <span class="wplco-small">建议 300-1800 秒。</span></label>
                     <hr>
                     <h3>前台轻量优化</h3>
                     <label><input type="checkbox" name="frontend_disable_emoji" value="1" <?php checked($settings['frontend_disable_emoji']); ?>> 禁用 WordPress Emoji 脚本</label>
