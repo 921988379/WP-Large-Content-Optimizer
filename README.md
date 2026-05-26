@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.3.0`
+`3.4.0`
 
 ## 后台入口
 
@@ -42,6 +42,9 @@ https://www.seoyh.net
 - 趋势记录清空工具
 - 媒体库问题附件样本审查
 - 页面缓存手动预热与排除规则
+- Cron Hook 来源/回调识别
+- Action Scheduler 任务状态分布与手动清理
+- Object Cache 能力与缓存分组检测
 - 页面缓存 HIT/MISS/BYPASS 命中统计
 - Cron Hook 暂停/恢复与按 Hook 删除已计划事件
 - 后台列表筛选器精简模式
@@ -52,6 +55,18 @@ https://www.seoyh.net
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.4.0 Object Cache 与任务队列治理
+
+3.4.0 继续补齐缓存与任务队列治理能力：
+
+- Redis/Object Cache 检测增加 drop-in 体积、批量读取能力、flush_runtime / flush_group 能力和缓存分组可见性
+- WP-Cron Hook 表新增来源/回调识别，暂停或删除 Hook 前更容易判断影响范围
+- WooCommerce / Action Scheduler 增加状态分布、分组 TOP、超时待执行、30 天前已完成/失败记录统计
+- 新增手动清理 30 天前 Action Scheduler 已完成/失败记录，单次最多 500 条，需管理员确认
+- 性能趋势记录增加关键指标变化卡片，便于观察优化前后变化
+
+所有新增治理操作均为手动触发，不自动删除业务任务，不修改 Redis/服务器缓存配置。
 
 ## 3.3.0 页面缓存观测与预热
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.4.0 - 2026-05-26
+
+### Added
+
+- Object Cache 检测增加 drop-in 体积、能力支持和缓存分组可见性。
+- WP-Cron Hook 列表新增来源/回调识别。
+- Action Scheduler 增加状态分布、分组 TOP、超时待执行、30 天前已完成/失败记录统计。
+- 新增手动清理 30 天前 Action Scheduler 已完成/失败记录，单次最多 500 条。
+- 性能趋势记录增加关键指标变化卡片。
+
+### Safety
+
+- 不自动清理 Action Scheduler 任务；所有维护都需要管理员手动确认。
+- 不修改 Redis、object-cache.php 或服务器缓存配置。
+- Cron 来源识别只读展示，避免盲目暂停或删除 Hook。
+
 ## 3.3.0 - 2026-05-26
 
 ### Added

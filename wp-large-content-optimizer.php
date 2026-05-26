@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.3.0
+ * Version: 3.4.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.3.0';
+    const VERSION = '3.4.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -619,6 +619,10 @@ final class WP_Large_Content_Optimizer {
         } elseif ($action === 'clear_trend_history') {
             delete_option('wplco_trend_history');
             $result = array('type' => 'success', 'message' => '性能趋势记录已清空。');
+        } elseif ($action === 'clean_completed_actions') {
+            $result = $this->clean_action_scheduler_actions('complete');
+        } elseif ($action === 'clean_failed_actions') {
+            $result = $this->clean_action_scheduler_actions('failed');
         }
 
         if (is_array($result)) {
@@ -1326,13 +1330,14 @@ final class WP_Large_Content_Optimizer {
                 <?php endif; ?>
                 <h3>高频/重复 Hook TOP</h3>
                 <table class="wplco-table">
-                    <thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
+                    <thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>来源/回调</th><th>状态</th><th>风险</th><th>操作</th></tr></thead>
                     <tbody>
                     <?php foreach ($cron_report['hooks'] as $row): ?>
                         <tr>
                             <td><code><?php echo esc_html($row['hook']); ?></code></td>
                             <td><?php echo esc_html(number_format_i18n($row['count'])); ?></td>
                             <td><?php echo esc_html($row['next_run']); ?></td>
+                            <td><span title="<?php echo esc_attr($row['source']['detail']); ?>"><?php echo esc_html($row['source']['label']); ?></span></td>
                             <td><span class="<?php echo esc_attr($row['paused'] ? 'wplco-warn' : 'wplco-ok'); ?>"><?php echo esc_html($row['paused'] ? '已暂停新调度' : '正常'); ?></span></td>
                             <td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td>
                             <td>
@@ -1349,27 +1354,45 @@ final class WP_Large_Content_Optimizer {
                 </table>
                 <?php if (!empty($cron_report['collector_hooks'])): ?>
                     <h3>采集相关 Hook</h3>
-                    <table class="wplco-table"><thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th></tr></thead><tbody>
-                    <?php foreach ($cron_report['collector_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['next_run']); ?></td></tr><?php endforeach; ?>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>事件数</th><th>下次运行</th><th>来源/回调</th></tr></thead><tbody>
+                    <?php foreach ($cron_report['collector_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['next_run']); ?></td><td><span title="<?php echo esc_attr($row['source']['detail']); ?>"><?php echo esc_html($row['source']['label']); ?></span></td></tr><?php endforeach; ?>
                     </tbody></table>
                 <?php endif; ?>
                 <p><?php $this->action_button('clean_duplicate_cron', '清理重复 Cron 事件', '只会清理完全重复的 cron 事件，每组保留一条。建议先确认没有任务正在运行，确定继续？'); ?></p>
             </div>
 
-            <div class="wplco-card" style="margin-top:16px">
+            <div class="wplco-card wplco-actions" style="margin-top:16px">
                 <h2>WooCommerce/Action Scheduler 检测</h2>
-                <p class="wplco-small">只读检测 WooCommerce 与 Action Scheduler 表/任务状态。未安装 WooCommerce 时也可以安全忽略。</p>
+                <p class="wplco-small">检测 WooCommerce 与 Action Scheduler 表/任务状态。维护按钮需要管理员手动确认，只清理 30 天前记录，单次最多 500 条。</p>
                 <div class="wplco-env">
                     <div><strong>WooCommerce</strong><br><span class="<?php echo esc_attr($commerce_report['woocommerce_class']); ?>"><?php echo esc_html($commerce_report['woocommerce']); ?></span></div>
                     <div><strong>Action Scheduler</strong><br><span class="<?php echo esc_attr($commerce_report['scheduler_class']); ?>"><?php echo esc_html($commerce_report['scheduler']); ?></span></div>
                     <div><strong>待执行任务</strong><br><span class="wplco-metric <?php echo $commerce_report['pending_actions'] > 1000 ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['pending_actions'])); ?></span></div>
+                    <div><strong>超 1 小时待执行</strong><br><span class="wplco-metric <?php echo $commerce_report['stale_pending_actions'] ? 'wplco-danger' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['stale_pending_actions'])); ?></span></div>
+                    <div><strong>运行中</strong><br><span class="wplco-metric <?php echo $commerce_report['running_actions'] > 20 ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['running_actions'])); ?></span></div>
                     <div><strong>失败任务</strong><br><span class="wplco-metric <?php echo $commerce_report['failed_actions'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['failed_actions'])); ?></span></div>
+                    <div><strong>已完成任务</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($commerce_report['complete_actions'])); ?></span></div>
+                    <div><strong>30 天前已完成</strong><br><span class="wplco-metric <?php echo $commerce_report['old_complete_actions'] > 1000 ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['old_complete_actions'])); ?></span></div>
+                    <div><strong>30 天前失败</strong><br><span class="wplco-metric <?php echo $commerce_report['old_failed_actions'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($commerce_report['old_failed_actions'])); ?></span></div>
                 </div>
+                <?php if (!empty($commerce_report['oldest_pending'])): ?><p class="wplco-small">最早待执行任务 GMT：<code><?php echo esc_html($commerce_report['oldest_pending']); ?></code></p><?php endif; ?>
                 <?php if (!empty($commerce_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($commerce_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                <?php if (!empty($commerce_report['status_rows'])): ?>
+                    <h3>任务状态分布</h3>
+                    <table class="wplco-table"><thead><tr><th>状态</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['status_rows'] as $row): ?><tr><td><code><?php echo esc_html($row['status']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
+                <?php if (!empty($commerce_report['group_rows'])): ?>
+                    <h3>任务分组 TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Group</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['group_rows'] as $row): ?><tr><td><code><?php echo esc_html($row['group']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
                 <?php if (!empty($commerce_report['top_hooks'])): ?>
                     <h3>Action Scheduler Hook TOP</h3>
-                    <table class="wplco-table"><thead><tr><th>Hook</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['top_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>状态</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['top_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['status']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
                 <?php endif; ?>
+                <p>
+                    <?php $this->action_button('clean_completed_actions', '清理 30 天前已完成任务', '只会清理 30 天前已完成的 Action Scheduler 记录和日志，单次最多 500 条。确定继续？'); ?>
+                    <?php $this->action_button('clean_failed_actions', '清理 30 天前失败任务', '建议先确认失败原因。只会清理 30 天前失败的 Action Scheduler 记录和日志，单次最多 500 条。确定继续？', 'delete'); ?>
+                </p>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -1401,6 +1424,11 @@ final class WP_Large_Content_Optimizer {
                     <ul class="wplco-list">
                         <?php foreach ($object_cache_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?>
                     </ul>
+                <?php endif; ?>
+                <?php if (!empty($object_cache_report['global_groups']) || !empty($object_cache_report['non_persistent_groups'])): ?>
+                    <h3>缓存分组可见性</h3>
+                    <?php if (!empty($object_cache_report['global_groups'])): ?><p class="wplco-small">全局组：<code><?php echo esc_html(implode('</code> <code>', $object_cache_report['global_groups'])); ?></code></p><?php endif; ?>
+                    <?php if (!empty($object_cache_report['non_persistent_groups'])): ?><p class="wplco-small">非持久组：<code><?php echo esc_html(implode('</code> <code>', $object_cache_report['non_persistent_groups'])); ?></code></p><?php endif; ?>
                 <?php endif; ?>
             </div>
 
@@ -1606,6 +1634,13 @@ final class WP_Large_Content_Optimizer {
                     </tbody>
                 </table>
                 <?php if (!empty($trend_report['summary'])): ?><p class="wplco-small"><?php echo esc_html($trend_report['summary']); ?></p><?php endif; ?>
+                <?php if (!empty($trend_report['deltas'])): ?>
+                    <div class="wplco-env">
+                        <?php foreach ($trend_report['deltas'] as $row): ?>
+                            <div><strong><?php echo esc_html($row['label']); ?> 变化</strong><br><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html(number_format_i18n($row['delta'])); ?></span></div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
                 <p><?php $this->action_button('clear_trend_history', '清空趋势记录', '确定清空性能趋势记录？不会影响数据库内容。'); ?></p>
             </div>
 
@@ -1814,12 +1849,12 @@ final class WP_Large_Content_Optimizer {
         <?php
     }
 
-    private function action_button($action, $label, $confirm) {
+    private function action_button($action, $label, $confirm, $button_class = 'secondary') {
         ?>
         <form method="post" onsubmit="return confirm('<?php echo esc_js($confirm); ?>');">
             <?php wp_nonce_field('wplco_action', 'wplco_nonce'); ?>
             <input type="hidden" name="wplco_action" value="<?php echo esc_attr($action); ?>">
-            <?php submit_button($label, 'secondary', 'submit', false); ?>
+            <?php submit_button($label, $button_class, 'submit', false); ?>
         </form>
         <?php
     }
@@ -2501,16 +2536,34 @@ PHP;
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
         $using = wp_using_ext_object_cache();
-        $dropin = file_exists(WP_CONTENT_DIR . '/object-cache.php');
+        $dropin_file = WP_CONTENT_DIR . '/object-cache.php';
+        $dropin = file_exists($dropin_file);
+        $dropin_size = $dropin ? filesize($dropin_file) : 0;
         $class = is_object($wp_object_cache) ? get_class($wp_object_cache) : 'none';
         $redis_plugin = is_plugin_active('redis-cache/redis-cache.php');
         $memcached_plugin = is_plugin_active('memcached-redux/object-cache.php') || is_plugin_active('w3-total-cache/w3-total-cache.php');
+        $supports_flush_runtime = function_exists('wp_cache_supports') && wp_cache_supports('flush_runtime');
+        $supports_flush_group = function_exists('wp_cache_supports') && wp_cache_supports('flush_group');
+        $supports_get_multiple = function_exists('wp_cache_supports') && wp_cache_supports('get_multiple');
+        $global_groups = array();
+        $non_persistent_groups = array();
+        if (is_object($wp_object_cache)) {
+            if (isset($wp_object_cache->global_groups) && is_array($wp_object_cache->global_groups)) {
+                $global_groups = array_slice(array_values($wp_object_cache->global_groups), 0, 12);
+            }
+            if (isset($wp_object_cache->non_persistent_groups) && is_array($wp_object_cache->non_persistent_groups)) {
+                $non_persistent_groups = array_slice(array_values($wp_object_cache->non_persistent_groups), 0, 12);
+            }
+        }
 
         $checks[] = array('label' => '持久对象缓存', 'value' => $using ? '已启用' : '未启用', 'class' => $using ? 'wplco-ok' : 'wplco-warn', 'hint' => $using ? 'WordPress 正在使用外部对象缓存。' : '文章多时建议启用 Redis Object Cache。');
-        $checks[] = array('label' => 'object-cache.php drop-in', 'value' => $dropin ? '存在' : '不存在', 'class' => $dropin ? 'wplco-ok' : 'wplco-warn', 'hint' => $dropin ? '已安装对象缓存 drop-in。' : '未检测到对象缓存 drop-in。');
+        $checks[] = array('label' => 'object-cache.php drop-in', 'value' => $dropin ? '存在（' . $this->format_bytes($dropin_size) . '）' : '不存在', 'class' => $dropin ? 'wplco-ok' : 'wplco-warn', 'hint' => $dropin ? '已安装对象缓存 drop-in。' : '未检测到对象缓存 drop-in。');
         $checks[] = array('label' => '对象缓存类', 'value' => $class, 'class' => $using ? 'wplco-ok' : 'wplco-warn', 'hint' => '用于判断当前对象缓存实现。');
         $checks[] = array('label' => 'Redis Cache 插件', 'value' => $redis_plugin ? '已启用' : '未启用/未安装', 'class' => $redis_plugin ? 'wplco-ok' : 'wplco-warn', 'hint' => '推荐大文章站使用 Redis Object Cache。');
-        $checks[] = array('label' => '缓存可写测试', 'value' => '待测试', 'class' => 'wplco-warn', 'hint' => '对象缓存可写性依赖当前 drop-in；建议在 Redis 插件页面查看连接状态。');
+        $checks[] = array('label' => '缓存可写测试', 'value' => '待测试', 'class' => 'wplco-warn', 'hint' => '写入/读取同一 key，判断对象缓存基础 API 是否正常。');
+        $checks[] = array('label' => 'flush_runtime 支持', 'value' => $supports_flush_runtime ? '支持' : '不支持/未知', 'class' => $supports_flush_runtime ? 'wplco-ok' : 'wplco-warn', 'hint' => '支持时可只清本次请求内存缓存，低风险。');
+        $checks[] = array('label' => 'flush_group 支持', 'value' => $supports_flush_group ? '支持' : '不支持/未知', 'class' => $supports_flush_group ? 'wplco-ok' : 'wplco-warn', 'hint' => '支持分组清理时维护更安全。');
+        $checks[] = array('label' => 'get_multiple 支持', 'value' => $supports_get_multiple ? '支持' : '不支持/未知', 'class' => $supports_get_multiple ? 'wplco-ok' : 'wplco-warn', 'hint' => '批量读取 API 有助于降低循环查询开销。');
 
         $test_key = 'wplco_object_cache_test_' . wp_generate_password(8, false);
         wp_cache_set($test_key, 'ok', 'wplco', 30);
@@ -2530,7 +2583,15 @@ PHP;
         if ($using && $test === 'ok') {
             $recommendations[] = '对象缓存基础状态正常。后续可关注 Redis 命中率、内存占用和 key 数量。';
         }
-        return array('checks' => $checks, 'recommendations' => array_slice($recommendations, 0, 6));
+        if (!$supports_get_multiple) {
+            $recommendations[] = '当前对象缓存实现未声明 get_multiple 支持；高并发站点可考虑升级 drop-in 或缓存插件。';
+        }
+        return array(
+            'checks' => $checks,
+            'global_groups' => $global_groups,
+            'non_persistent_groups' => $non_persistent_groups,
+            'recommendations' => array_slice($recommendations, 0, 8),
+        );
     }
 
 
@@ -2614,7 +2675,6 @@ PHP;
                 'distinct_values' => $distinct,
                 'risk' => $risk,
                 'class' => $class,
-                'paused' => in_array($row['hook'], $paused_hooks, true),
             );
         }
 
@@ -2735,6 +2795,32 @@ PHP;
     }
 
 
+    private function cron_hook_sources($hook) {
+        global $wp_filter;
+        if (empty($wp_filter[$hook]) || !isset($wp_filter[$hook]->callbacks) || !is_array($wp_filter[$hook]->callbacks)) {
+            return array('label' => '未识别', 'detail' => '当前请求中没有注册回调，可能由插件按需注册或已停用。');
+        }
+        $sources = array();
+        foreach ($wp_filter[$hook]->callbacks as $priority => $callbacks) {
+            foreach ((array) $callbacks as $callback) {
+                $fn = isset($callback['function']) ? $callback['function'] : null;
+                if (is_string($fn)) {
+                    $sources[] = $fn;
+                } elseif (is_array($fn)) {
+                    $owner = is_object($fn[0]) ? get_class($fn[0]) : (string) $fn[0];
+                    $sources[] = $owner . '::' . (string) $fn[1];
+                } elseif ($fn instanceof Closure) {
+                    $sources[] = 'Closure';
+                }
+            }
+        }
+        $sources = array_values(array_unique(array_filter($sources)));
+        if (empty($sources)) {
+            return array('label' => '未识别', 'detail' => '未能解析回调来源。');
+        }
+        return array('label' => implode(', ', array_slice($sources, 0, 2)), 'detail' => implode(', ', array_slice($sources, 0, 6)));
+    }
+
     private function collect_cron_report() {
         $cron = _get_cron_array();
         $now = time();
@@ -2802,6 +2888,7 @@ PHP;
                 'risk' => $risk,
                 'class' => $class,
                 'paused' => in_array($row['hook'], $paused_hooks, true),
+                'source' => $this->cron_hook_sources($row['hook']),
             );
             $hook_rows[] = $item;
             if (!empty($row['collector'])) {
@@ -2964,30 +3051,83 @@ PHP;
             update_option('wplco_trend_history', $history, false);
         }
         $summary = '';
+        $deltas = array();
         if (count($history) >= 2) {
             $first = reset($history);
             $latest = end($history);
+            $metrics = array('score' => '健康分', 'posts' => 'wp_posts', 'postmeta' => 'postmeta', 'autoload' => 'autoload 数量', 'expired_transients' => '过期 transient');
+            foreach ($metrics as $key => $label) {
+                $delta = intval($latest[$key]) - intval($first[$key]);
+                $deltas[] = array('label' => $label, 'delta' => $delta, 'class' => (($key === 'score' && $delta >= 0) || ($key !== 'score' && $delta <= 0)) ? 'wplco-ok' : 'wplco-warn');
+            }
             $delta_meta = intval($latest['postmeta']) - intval($first['postmeta']);
             $delta_posts = intval($latest['posts']) - intval($first['posts']);
             $summary = '最近 ' . count($history) . ' 次记录：wp_posts 变化 ' . number_format_i18n($delta_posts) . '，postmeta 变化 ' . number_format_i18n($delta_meta) . '。';
         }
-        return array('history' => array_reverse($history), 'summary' => $summary);
+        return array('history' => array_reverse($history), 'summary' => $summary, 'deltas' => $deltas);
+    }
+
+    private function clean_action_scheduler_actions($status) {
+        global $wpdb;
+        $status = $status === 'failed' ? 'failed' : 'complete';
+        $actions_table = $wpdb->prefix . 'actionscheduler_actions';
+        $logs_table = $wpdb->prefix . 'actionscheduler_logs';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $actions_table)) !== $actions_table) {
+            return array('type' => 'error', 'message' => '未检测到 Action Scheduler 数据表。');
+        }
+        $cutoff = gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS);
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT action_id FROM {$actions_table} WHERE status=%s AND scheduled_date_gmt < %s ORDER BY scheduled_date_gmt ASC LIMIT 500", $status, $cutoff));
+        $ids = array_map('intval', (array) $ids);
+        if (empty($ids)) {
+            return array('type' => 'success', 'message' => ($status === 'failed' ? '失败' : '已完成') . ' Action Scheduler 任务中没有 30 天前的可清理记录。');
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $logs_table)) === $logs_table) {
+            $wpdb->query($wpdb->prepare("DELETE FROM {$logs_table} WHERE action_id IN ($placeholders)", $ids));
+        }
+        $deleted = $wpdb->query($wpdb->prepare("DELETE FROM {$actions_table} WHERE action_id IN ($placeholders)", $ids));
+        return array('type' => 'success', 'message' => '已清理 ' . number_format_i18n(intval($deleted)) . ' 条 30 天前的 ' . ($status === 'failed' ? '失败' : '已完成') . ' Action Scheduler 任务记录（单次最多 500 条）。');
     }
 
     private function collect_commerce_report() {
         global $wpdb;
         $woocommerce = class_exists('WooCommerce') || in_array('woocommerce/woocommerce.php', (array) get_option('active_plugins', array()), true);
         $actions_table = $wpdb->prefix . 'actionscheduler_actions';
+        $groups_table = $wpdb->prefix . 'actionscheduler_groups';
         $has_actions = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $actions_table)) === $actions_table;
         $pending = 0;
         $failed = 0;
+        $complete = 0;
+        $running = 0;
+        $stale_pending = 0;
+        $old_complete = 0;
+        $old_failed = 0;
         $top_hooks = array();
+        $status_rows = array();
+        $group_rows = array();
+        $oldest_pending = '';
         if ($has_actions) {
             $pending = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='pending'"));
             $failed = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='failed'"));
-            $rows = $wpdb->get_results("SELECT hook, COUNT(*) AS total FROM {$actions_table} WHERE status IN ('pending','failed') GROUP BY hook ORDER BY total DESC LIMIT 10", ARRAY_A);
+            $complete = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='complete'"));
+            $running = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='in-progress'"));
+            $stale_pending = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$actions_table} WHERE status='pending' AND scheduled_date_gmt < %s", gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS))));
+            $old_complete = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$actions_table} WHERE status='complete' AND scheduled_date_gmt < %s", gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS))));
+            $old_failed = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$actions_table} WHERE status='failed' AND scheduled_date_gmt < %s", gmdate('Y-m-d H:i:s', time() - 30 * DAY_IN_SECONDS))));
+            $oldest_pending = (string) $wpdb->get_var("SELECT scheduled_date_gmt FROM {$actions_table} WHERE status='pending' ORDER BY scheduled_date_gmt ASC LIMIT 1");
+            $rows = $wpdb->get_results("SELECT hook, status, COUNT(*) AS total FROM {$actions_table} WHERE status IN ('pending','failed','in-progress') GROUP BY hook, status ORDER BY total DESC LIMIT 12", ARRAY_A);
             foreach ((array) $rows as $row) {
-                $top_hooks[] = array('hook' => $row['hook'], 'count' => intval($row['total']));
+                $top_hooks[] = array('hook' => $row['hook'], 'status' => $row['status'], 'count' => intval($row['total']));
+            }
+            $rows = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$actions_table} GROUP BY status ORDER BY total DESC", ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $status_rows[] = array('status' => $row['status'], 'count' => intval($row['total']));
+            }
+            if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $groups_table)) === $groups_table) {
+                $rows = $wpdb->get_results("SELECT g.slug, COUNT(*) AS total FROM {$actions_table} a LEFT JOIN {$groups_table} g ON a.group_id=g.group_id WHERE a.status IN ('pending','failed','in-progress') GROUP BY g.slug ORDER BY total DESC LIMIT 8", ARRAY_A);
+                foreach ((array) $rows as $row) {
+                    $group_rows[] = array('group' => $row['slug'] ? $row['slug'] : '(none)', 'count' => intval($row['total']));
+                }
             }
         }
         $recommendations = array();
@@ -2997,8 +3137,14 @@ PHP;
         if ($pending > 1000) {
             $recommendations[] = 'Action Scheduler 待执行任务超过 1000，建议检查队列是否堵塞、WP-Cron 是否稳定、采集/同步任务是否过频。';
         }
+        if ($stale_pending > 0) {
+            $recommendations[] = '存在超过 1 小时仍未执行的待执行任务，建议检查 WP-Cron、服务器计划任务或 Action Scheduler runner。';
+        }
         if ($failed > 0) {
-            $recommendations[] = '存在失败 Action Scheduler 任务，建议到 WooCommerce/工具页面查看失败原因并清理。';
+            $recommendations[] = '存在失败 Action Scheduler 任务，建议先查看失败原因；30 天前的失败记录可手动清理。';
+        }
+        if ($old_complete > 1000) {
+            $recommendations[] = '30 天前已完成 Action Scheduler 记录较多，可分批清理以降低数据表体积。';
         }
         if ($woocommerce) {
             $recommendations[] = 'WooCommerce 站点建议重点关注订单表、Action Scheduler、购物车 fragments 与对象缓存命中率。';
@@ -3013,8 +3159,16 @@ PHP;
             'scheduler_class' => $has_actions ? 'wplco-ok' : 'wplco-warn',
             'pending_actions' => $pending,
             'failed_actions' => $failed,
+            'complete_actions' => $complete,
+            'running_actions' => $running,
+            'stale_pending_actions' => $stale_pending,
+            'old_complete_actions' => $old_complete,
+            'old_failed_actions' => $old_failed,
+            'oldest_pending' => $oldest_pending,
             'top_hooks' => $top_hooks,
-            'recommendations' => $recommendations,
+            'status_rows' => $status_rows,
+            'group_rows' => $group_rows,
+            'recommendations' => array_slice($recommendations, 0, 8),
         );
     }
 
