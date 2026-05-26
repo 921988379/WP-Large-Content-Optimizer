@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.9.0 - 2026-05-26
+
+### Added
+
+- 新增 postmeta 深度治理模块。
+- 支持检测并分批清理低风险 postmeta：`_edit_lock`、`_edit_last`、`_wp_old_slug`、`_oembed_*`。
+- 支持检测并分批清理低风险字段中的完全重复 postmeta，每组保留最早一条。
+- 新增超大 `meta_value` TOP 只读审查，避免盲删高风险数据。
+- 新增 autoload 优化器，展示 autoload 总体积、大项、风险级别和保护状态。
+- 支持将非保护 option 改为不自动加载，并保存回滚记录。
+
+### Safety
+
+- WordPress 核心关键 option、主题 mods、active_plugins、rewrite_rules、cron 等默认保护，不允许直接改为不自动加载。
+- postmeta 深度清理仅处理低风险缓存/编辑痕迹字段，不自动删除业务字段或已发布文章。
+
 ## 2.8.0 - 2026-05-26
 
 ### Added

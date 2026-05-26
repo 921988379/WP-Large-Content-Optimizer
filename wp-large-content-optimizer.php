@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 2.8.0
+ * Version: 2.9.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.8.0';
+    const VERSION = '2.9.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -542,6 +542,10 @@ final class WP_Large_Content_Optimizer {
             $result = $this->clean_trash();
         } elseif ($action === 'clean_orphan_postmeta') {
             $result = $this->clean_orphan_postmeta();
+        } elseif ($action === 'clean_safe_postmeta') {
+            $result = $this->clean_safe_postmeta();
+        } elseif ($action === 'clean_duplicate_postmeta') {
+            $result = $this->clean_duplicate_postmeta();
         } elseif ($action === 'clean_orphan_term_relationships') {
             $result = $this->clean_orphan_term_relationships();
         } elseif ($action === 'clean_expired_transients') {
@@ -562,6 +566,10 @@ final class WP_Large_Content_Optimizer {
             $result = $this->clean_duplicate_cron_events();
         } elseif ($action === 'clear_page_cache') {
             $result = $this->clear_page_cache();
+        } elseif ($action === 'disable_autoload_option') {
+            $result = $this->disable_autoload_option();
+        } elseif ($action === 'restore_autoload_option') {
+            $result = $this->restore_autoload_option();
         }
 
         if (is_array($result)) {
@@ -876,6 +884,8 @@ final class WP_Large_Content_Optimizer {
         $table_sizes = $report['table_sizes'];
         $meta_hotspots = $report['meta_hotspots'];
         $autoload_heavy = $report['autoload_heavy'];
+        $postmeta_deep_report = $report['postmeta_deep_report'];
+        $autoload_optimizer_report = $report['autoload_optimizer_report'];
         $environment = $report['environment'];
         $wizard_steps = $report['wizard_steps'];
         $collector_stats = $report['collector_stats'];
@@ -1020,6 +1030,63 @@ final class WP_Large_Content_Optimizer {
                         </tbody>
                     </table>
                     <p class="wplco-small">autoload 会在几乎每次请求加载。单项很大或总量很大，会直接拖慢前后台。</p>
+                </div>
+            </div>
+
+            <div class="wplco-two">
+                <div class="wplco-card wplco-actions">
+                    <h2>postmeta 深度治理</h2>
+                    <div class="wplco-env">
+                        <div><strong>安全可清理 meta</strong><br><span class="wplco-metric <?php echo $postmeta_deep_report['safe_total'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($postmeta_deep_report['safe_total'])); ?></span></div>
+                        <div><strong>重复 postmeta</strong><br><span class="wplco-metric <?php echo $postmeta_deep_report['duplicate_removable'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($postmeta_deep_report['duplicate_removable'])); ?></span></div>
+                        <div><strong>空 meta_value</strong><br><span class="wplco-metric <?php echo $postmeta_deep_report['empty_values'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($postmeta_deep_report['empty_values'])); ?></span></div>
+                    </div>
+                    <h3>安全候选字段</h3>
+                    <table class="wplco-table"><thead><tr><th>meta_key</th><th>数量</th><th>体积</th><th>说明</th></tr></thead><tbody>
+                    <?php foreach ($postmeta_deep_report['safe_keys'] as $row): ?>
+                        <tr><td><code><?php echo esc_html($row['meta_key']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($this->format_bytes($row['bytes'])); ?></td><td><?php echo esc_html($row['hint']); ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody></table>
+                    <p>
+                        <?php $this->action_button('clean_safe_postmeta', '分批清理安全 postmeta', '只清理 _edit_lock/_edit_last/_wp_old_slug/_oembed_* 这类低风险缓存/编辑痕迹字段。建议先备份数据库，确定继续？'); ?>
+                        <?php $this->action_button('clean_duplicate_postmeta', '分批清理重复 postmeta', '只删除低风险字段中完全相同 post_id + meta_key + meta_value 的重复记录，每组保留最早一条。建议先备份数据库，确定继续？'); ?>
+                    </p>
+                    <?php if (!empty($postmeta_deep_report['huge_values'])): ?>
+                        <h3>超大 meta_value TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>meta_id</th><th>post_id</th><th>meta_key</th><th>大小</th></tr></thead><tbody>
+                        <?php foreach ($postmeta_deep_report['huge_values'] as $row): ?>
+                            <tr><td><code><?php echo esc_html($row['meta_id']); ?></code></td><td><code><?php echo esc_html($row['post_id']); ?></code></td><td><code><?php echo esc_html($row['meta_key']); ?></code></td><td><?php echo esc_html($this->format_bytes($row['bytes'])); ?></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table>
+                        <p class="wplco-small">超大 meta 只展示，不自动删除。通常要先判断来源插件和用途。</p>
+                    <?php endif; ?>
+                </div>
+
+                <div class="wplco-card">
+                    <h2>autoload 优化器</h2>
+                    <div class="wplco-env">
+                        <div><strong>autoload 总体积</strong><br><span class="wplco-metric <?php echo esc_attr($autoload_optimizer_report['total_class']); ?>"><?php echo esc_html($this->format_bytes($autoload_optimizer_report['total_bytes'])); ?></span></div>
+                        <div><strong>可回滚记录</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n(count($autoload_optimizer_report['backups']))); ?></span></div>
+                    </div>
+                    <p class="wplco-small">仅展示大 autoload 项。点击“改为不自动加载”前会记录原 autoload 状态，可在下方回滚。核心 WordPress 关键 option 已保护。</p>
+                    <table class="wplco-table"><thead><tr><th>option_name</th><th>大小</th><th>风险</th><th>操作</th></tr></thead><tbody>
+                    <?php foreach ($autoload_optimizer_report['candidates'] as $row): ?>
+                        <tr>
+                            <td><code><?php echo esc_html($row['option_name']); ?></code></td>
+                            <td><?php echo esc_html($this->format_bytes($row['bytes'])); ?></td>
+                            <td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td>
+                            <td><?php if (!$row['protected']): ?><form method="post" onsubmit="return confirm('将该 option 改为不自动加载？建议确认它不是每次请求都必需的配置。');"><?php wp_nonce_field('wplco_action', 'wplco_nonce'); ?><input type="hidden" name="wplco_action" value="disable_autoload_option"><input type="hidden" name="option_name" value="<?php echo esc_attr($row['option_name']); ?>"><?php submit_button('改为不自动加载', 'secondary small', 'submit', false); ?></form><?php else: ?><span class="wplco-small">已保护</span><?php endif; ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody></table>
+                    <?php if (!empty($autoload_optimizer_report['backups'])): ?>
+                        <h3>autoload 回滚</h3>
+                        <table class="wplco-table"><thead><tr><th>option_name</th><th>原状态</th><th>时间</th><th>操作</th></tr></thead><tbody>
+                        <?php foreach ($autoload_optimizer_report['backups'] as $name => $backup): ?>
+                            <tr><td><code><?php echo esc_html($name); ?></code></td><td><?php echo esc_html($backup['autoload']); ?></td><td><?php echo esc_html($backup['time']); ?></td><td><form method="post" onsubmit="return confirm('恢复该 option 的原 autoload 状态？');"><?php wp_nonce_field('wplco_action', 'wplco_nonce'); ?><input type="hidden" name="wplco_action" value="restore_autoload_option"><input type="hidden" name="option_name" value="<?php echo esc_attr($name); ?>"><?php submit_button('恢复', 'secondary small', 'submit', false); ?></form></td></tr>
+                        <?php endforeach; ?>
+                        </tbody></table>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -1370,13 +1437,13 @@ final class WP_Large_Content_Optimizer {
                 var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
-                    '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
+                    '数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
                     'WP-Cron 与采集任务检测':'cron',
                     '前台性能与缓存检测':'frontend','页面缓存':'frontend','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
-                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析'];
+                var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器'];
                 cards.forEach(function(card){
                     var h2=card.querySelector(':scope > h2');
                     if(!h2 || card.classList.contains('wplco-js-ready')){return;}
@@ -2176,6 +2243,8 @@ final class WP_Large_Content_Optimizer {
             'table_sizes' => $this->collect_table_sizes(),
             'meta_hotspots' => $this->collect_meta_hotspots(),
             'autoload_heavy' => $this->collect_autoload_heavy_options(),
+            'postmeta_deep_report' => $this->collect_postmeta_deep_report(),
+            'autoload_optimizer_report' => $this->collect_autoload_optimizer_report(),
             'environment' => $this->collect_environment(),
             'wizard_steps' => $this->build_wizard_steps($stats, $indexes),
             'collector_stats' => $this->collect_collector_stats(),
@@ -2418,6 +2487,141 @@ final class WP_Large_Content_Optimizer {
         );
 
         return array_slice($steps, 0, 8);
+    }
+
+    private function safe_postmeta_key_hints() {
+        return array(
+            '_edit_lock' => '编辑锁记录，历史残留可清理。',
+            '_edit_last' => '最后编辑者记录，通常不影响前台。',
+            '_wp_old_slug' => '旧别名记录，过多会膨胀 postmeta；若依赖旧链接自动跳转需谨慎。',
+            '_oembed_%' => 'oEmbed 缓存字段，可由 WordPress 重新生成。',
+        );
+    }
+
+    private function collect_postmeta_deep_report() {
+        global $wpdb;
+        $safe_keys = array();
+        $safe_total = 0;
+        foreach ($this->safe_postmeta_key_hints() as $key => $hint) {
+            if (strpos($key, '%') !== false) {
+                $row = $wpdb->get_row($wpdb->prepare("SELECT COUNT(*) AS total, COALESCE(SUM(LENGTH(meta_value)),0) AS bytes FROM {$wpdb->postmeta} WHERE meta_key LIKE %s", $key), ARRAY_A);
+            } else {
+                $row = $wpdb->get_row($wpdb->prepare("SELECT COUNT(*) AS total, COALESCE(SUM(LENGTH(meta_value)),0) AS bytes FROM {$wpdb->postmeta} WHERE meta_key=%s", $key), ARRAY_A);
+            }
+            $count = $row ? intval($row['total']) : 0;
+            $safe_total += $count;
+            $safe_keys[] = array('meta_key' => $key, 'count' => $count, 'bytes' => $row ? intval($row['bytes']) : 0, 'hint' => $hint);
+        }
+        $duplicate_removable = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->postmeta} pm2 INNER JOIN {$wpdb->postmeta} pm1 ON pm1.post_id = pm2.post_id AND pm1.meta_key = pm2.meta_key AND pm1.meta_value = pm2.meta_value AND pm1.meta_id < pm2.meta_id WHERE (pm2.meta_key IN ('_edit_lock','_edit_last','_wp_old_slug') OR pm2.meta_key LIKE %s)", '_oembed_%')));
+        $empty_values = intval($wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_value = ''"));
+        $huge_rows = $wpdb->get_results("SELECT meta_id, post_id, meta_key, LENGTH(meta_value) AS bytes FROM {$wpdb->postmeta} WHERE LENGTH(meta_value) > 262144 ORDER BY bytes DESC LIMIT 10", ARRAY_A);
+        $huge_values = array();
+        foreach ((array) $huge_rows as $row) {
+            $huge_values[] = array('meta_id' => intval($row['meta_id']), 'post_id' => intval($row['post_id']), 'meta_key' => $row['meta_key'], 'bytes' => intval($row['bytes']));
+        }
+        return array('safe_keys' => $safe_keys, 'safe_total' => $safe_total, 'duplicate_removable' => $duplicate_removable, 'empty_values' => $empty_values, 'huge_values' => $huge_values);
+    }
+
+    private function clean_safe_postmeta() {
+        global $wpdb;
+        $limit = $this->batch_size();
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key IN ('_edit_lock','_edit_last','_wp_old_slug') OR meta_key LIKE %s ORDER BY meta_id ASC LIMIT %d", '_oembed_%', $limit));
+        $ids = array_map('intval', (array) $ids);
+        if (empty($ids)) {
+            return array('type' => 'success', 'message' => '没有发现可安全清理的 postmeta。');
+        }
+        $deleted = $wpdb->query("DELETE FROM {$wpdb->postmeta} WHERE meta_id IN (" . implode(',', $ids) . ")");
+        return array('type' => 'success', 'message' => '已清理安全 postmeta：' . number_format_i18n(intval($deleted)) . ' 条。');
+    }
+
+    private function clean_duplicate_postmeta() {
+        global $wpdb;
+        $limit = $this->batch_size();
+        $delete_ids = $wpdb->get_col($wpdb->prepare("SELECT pm2.meta_id FROM {$wpdb->postmeta} pm2 INNER JOIN {$wpdb->postmeta} pm1 ON pm1.post_id = pm2.post_id AND pm1.meta_key = pm2.meta_key AND pm1.meta_value = pm2.meta_value AND pm1.meta_id < pm2.meta_id WHERE (pm2.meta_key IN ('_edit_lock','_edit_last','_wp_old_slug') OR pm2.meta_key LIKE %s) ORDER BY pm2.meta_id ASC LIMIT %d", '_oembed_%', $limit));
+        $delete_ids = array_values(array_unique(array_filter($delete_ids)));
+        if (empty($delete_ids)) {
+            return array('type' => 'success', 'message' => '没有发现可清理的完全重复 postmeta。');
+        }
+        $deleted = $wpdb->query("DELETE FROM {$wpdb->postmeta} WHERE meta_id IN (" . implode(',', $delete_ids) . ")");
+        return array('type' => 'success', 'message' => '已清理低风险重复 postmeta：' . number_format_i18n(intval($deleted)) . ' 条。');
+    }
+
+    private function protected_autoload_options() {
+        return array('siteurl','home','blogname','blogdescription','users_can_register','admin_email','template','stylesheet','current_theme','active_plugins','rewrite_rules','cron','sidebars_widgets','widget_pages','widget_text','widget_categories','widget_nav_menu','theme_mods_' . get_option('stylesheet'));
+    }
+
+    private function collect_autoload_optimizer_report() {
+        global $wpdb;
+        $total_bytes = intval($wpdb->get_var("SELECT COALESCE(SUM(LENGTH(option_value)),0) FROM {$wpdb->options} WHERE autoload IN ('yes','on','auto-on','auto')"));
+        $rows = $wpdb->get_results("SELECT option_name, autoload, LENGTH(option_value) AS bytes FROM {$wpdb->options} WHERE autoload IN ('yes','on','auto-on','auto') ORDER BY bytes DESC LIMIT 20", ARRAY_A);
+        $protected = $this->protected_autoload_options();
+        $candidates = array();
+        foreach ((array) $rows as $row) {
+            $name = $row['option_name'];
+            $bytes = intval($row['bytes']);
+            $is_protected = in_array($name, $protected, true) || strpos($name, 'theme_mods_') === 0;
+            $risk = $bytes > 1048576 ? '高：单项超过 1MB' : ($bytes > 262144 ? '中：单项较大' : '低');
+            $class = $bytes > 1048576 ? 'wplco-danger' : ($bytes > 262144 ? 'wplco-warn' : 'wplco-ok');
+            $candidates[] = array('option_name' => $name, 'autoload' => $row['autoload'], 'bytes' => $bytes, 'risk' => $risk, 'class' => $class, 'protected' => $is_protected);
+        }
+        $backups = get_option('wplco_autoload_backups', array());
+        if (!is_array($backups)) {
+            $backups = array();
+        }
+        return array('total_bytes' => $total_bytes, 'total_class' => $total_bytes > 5 * 1024 * 1024 ? 'wplco-danger' : ($total_bytes > 1024 * 1024 ? 'wplco-warn' : 'wplco-ok'), 'candidates' => $candidates, 'backups' => $backups);
+    }
+
+    private function requested_option_name() {
+        return isset($_POST['option_name']) ? sanitize_text_field(wp_unslash($_POST['option_name'])) : '';
+    }
+
+    private function disable_autoload_option() {
+        global $wpdb;
+        $name = $this->requested_option_name();
+        if ($name === '') {
+            return array('type' => 'error', 'message' => '缺少 option_name。');
+        }
+        if (in_array($name, $this->protected_autoload_options(), true) || strpos($name, 'theme_mods_') === 0) {
+            return array('type' => 'error', 'message' => '该 option 属于保护项，未修改。');
+        }
+        $row = $wpdb->get_row($wpdb->prepare("SELECT option_name, autoload, LENGTH(option_value) AS bytes FROM {$wpdb->options} WHERE option_name=%s", $name), ARRAY_A);
+        if (!$row) {
+            return array('type' => 'error', 'message' => '未找到该 option。');
+        }
+        $backups = get_option('wplco_autoload_backups', array());
+        if (!is_array($backups)) {
+            $backups = array();
+        }
+        if (!isset($backups[$name])) {
+            $backups[$name] = array('autoload' => $row['autoload'], 'bytes' => intval($row['bytes']), 'time' => current_time('mysql'));
+            update_option('wplco_autoload_backups', array_slice($backups, -50, null, true), false);
+        }
+        $updated = $wpdb->update($wpdb->options, array('autoload' => 'no'), array('option_name' => $name), array('%s'), array('%s'));
+        wp_cache_delete($name, 'options');
+        wp_cache_delete('alloptions', 'options');
+        if ($updated === false) {
+            return array('type' => 'error', 'message' => '修改 autoload 失败：' . $name);
+        }
+        return array('type' => 'success', 'message' => '已将 option 改为不自动加载：' . $name . '。如异常可在 autoload 回滚区恢复。');
+    }
+
+    private function restore_autoload_option() {
+        global $wpdb;
+        $name = $this->requested_option_name();
+        $backups = get_option('wplco_autoload_backups', array());
+        if ($name === '' || !is_array($backups) || !isset($backups[$name])) {
+            return array('type' => 'error', 'message' => '未找到该 option 的回滚记录。');
+        }
+        $autoload = sanitize_key($backups[$name]['autoload']);
+        $updated = $wpdb->update($wpdb->options, array('autoload' => $autoload), array('option_name' => $name), array('%s'), array('%s'));
+        wp_cache_delete($name, 'options');
+        wp_cache_delete('alloptions', 'options');
+        if ($updated === false) {
+            return array('type' => 'error', 'message' => '恢复 autoload 失败：' . $name);
+        }
+        unset($backups[$name]);
+        update_option('wplco_autoload_backups', $backups, false);
+        return array('type' => 'success', 'message' => '已恢复 option 的 autoload 状态：' . $name . '。');
     }
 
     private function collect_environment() {

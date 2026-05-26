@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`2.8.0`
+`2.9.0`
 
 ## 后台入口
 
@@ -33,8 +33,20 @@ https://www.seoyh.net
 - WP-Cron 与采集任务检测
 - 后台文章列表查询缓存
 - 后台列表 AJAX 延迟统计
+- postmeta 深度治理
+- autoload 优化器
 - 轻量页面缓存（默认关闭）
 - Redis/Object Cache 深度检测
+
+## 数据库深度治理
+
+2.9.0 新增 postmeta 深度治理和 autoload 优化器：
+
+- 检测并分批清理低风险 postmeta：`_edit_lock`、`_edit_last`、`_wp_old_slug`、`_oembed_*`
+- 检测低风险重复 postmeta，每组保留最早一条
+- 展示超大 `meta_value`，只读提示，不自动删除
+- 统计 autoload 总体积，展示大 autoload option
+- 非保护 option 可改为不自动加载，并记录回滚信息
 
 ## 后台列表 AJAX 延迟统计
 

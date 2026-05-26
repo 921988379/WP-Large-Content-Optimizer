@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 2.8.0
+Stable tag: 2.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -38,6 +38,8 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * WP-Cron 与采集任务检测
 * 后台文章列表查询缓存
 * 后台列表 AJAX 延迟统计
+* postmeta 深度治理
+* autoload 优化器
 * 轻量页面缓存（默认关闭）
 * Redis/Object Cache 深度检测
 * JSON 诊断报告导出
@@ -78,6 +80,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 2.9.0 的数据库深度治理做了什么？ =
+
+新增 postmeta 深度治理和 autoload 优化器。postmeta 模块可检测并分批清理低风险缓存/编辑痕迹字段（如 _edit_lock、_edit_last、_wp_old_slug、_oembed_*），检测低风险重复 postmeta 和超大 meta_value。autoload 优化器展示 autoload 总体积和大项，支持将非保护项改为不自动加载，并提供回滚记录。
 
 = 后台列表 AJAX 延迟统计有什么用？ =
 
