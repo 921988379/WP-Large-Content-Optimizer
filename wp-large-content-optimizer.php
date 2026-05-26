@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 2.7.0
+ * Version: 2.7.1
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,9 +14,10 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.7.0';
+    const VERSION = '2.7.1';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
+    const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
     const GITHUB_OWNER = '921988379';
     const GITHUB_REPO = 'WP-Large-Content-Optimizer';
     const GITHUB_PLUGIN_FILE = 'wp-large-content-optimizer/wp-large-content-optimizer.php';
@@ -27,6 +28,7 @@ final class WP_Large_Content_Optimizer {
     private $page_cache_file = '';
     private $page_cache_key = '';
     private $page_cache_started = 0;
+    private $page_cache_buffer_level = 0;
 
     public static function instance() {
         if (self::$instance === null) {
@@ -401,6 +403,7 @@ final class WP_Large_Content_Optimizer {
         $settings['cron_clean_orphan_postmeta'] = empty($_POST['cron_clean_orphan_postmeta']) ? 0 : 1;
         $settings['cron_clean_expired_transients'] = empty($_POST['cron_clean_expired_transients']) ? 0 : 1;
         update_option(self::OPTION, $settings, false);
+        delete_transient('wplco_diagnostic_report');
     }
 
     private function github_api_url($path) {
@@ -1013,6 +1016,8 @@ final class WP_Large_Content_Optimizer {
                     <div><strong>缓存时间</strong><br><span class="wplco-metric"><?php echo esc_html($page_cache_report['ttl_label']); ?></span></div>
                     <div><strong>缓存文件</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($page_cache_report['files'])); ?></span></div>
                     <div><strong>缓存体积</strong><br><span class="wplco-metric"><?php echo esc_html($this->format_bytes($page_cache_report['bytes'])); ?></span></div>
+                    <div><strong>最后生成</strong><br><span><?php echo $page_cache_report['last_generated'] ? esc_html(date_i18n('Y-m-d H:i:s', $page_cache_report['last_generated'])) : '暂无'; ?></span></div>
+                    <div><strong>最后清理</strong><br><span><?php echo $page_cache_report['last_cleared'] ? esc_html(date_i18n('Y-m-d H:i:s', $page_cache_report['last_cleared'])) : '暂无'; ?></span></div>
                 </div>
                 <?php if (!empty($page_cache_report['recommendations'])): ?>
                     <h3>建议</h3>
@@ -1406,10 +1411,12 @@ final class WP_Large_Content_Optimizer {
             header('X-WLCO-Cache: MISS');
             header('X-WLCO-Cache-Key: ' . $key);
         }
+        $this->ensure_page_cache_dir();
         $this->page_cache_active = true;
         $this->page_cache_key = $key;
         $this->page_cache_file = $file;
         $this->page_cache_started = time();
+        $this->page_cache_buffer_level = ob_get_level();
         ob_start();
     }
 
@@ -1417,27 +1424,66 @@ final class WP_Large_Content_Optimizer {
         if (!$this->page_cache_active || empty($this->page_cache_file) || !ob_get_level()) {
             return;
         }
-        $html = ob_get_contents();
-        if (!is_string($html) || strlen($html) < 512 || stripos($html, '<html') === false) {
+        if (ob_get_level() !== ($this->page_cache_buffer_level + 1)) {
             return;
+        }
+        $this->store_page_cache_html(ob_get_contents());
+    }
+
+    private function store_page_cache_html($html) {
+        if (!is_string($html) || strlen($html) < 512 || stripos($html, '<html') === false) {
+            return false;
         }
         if (function_exists('http_response_code')) {
             $code = http_response_code();
             if ($code && intval($code) !== 200) {
-                return;
+                return false;
             }
         }
         foreach (headers_list() as $header) {
-            if (stripos($header, 'Set-Cookie:') === 0 || stripos($header, 'Content-Type:') === 0 && stripos($header, 'text/html') === false) {
-                return;
+            if (stripos($header, 'Set-Cookie:') === 0 || (stripos($header, 'Content-Type:') === 0 && stripos($header, 'text/html') === false)) {
+                return false;
             }
         }
         $dir = dirname($this->page_cache_file);
-        if (!wp_mkdir_p($dir) || !is_writable($dir)) {
-            return;
+        if (!$this->ensure_page_cache_dir($dir) || !is_writable($dir)) {
+            return false;
         }
         $meta = "\n<!-- WLCO page cache: " . esc_html(gmdate('c', $this->page_cache_started)) . ' key=' . esc_html($this->page_cache_key) . " -->\n";
-        file_put_contents($this->page_cache_file, $html . $meta, LOCK_EX);
+        $stored = file_put_contents($this->page_cache_file, $html . $meta, LOCK_EX);
+        if ($stored !== false) {
+            $this->update_page_cache_meta(array(
+                'last_generated' => time(),
+                'last_generated_key' => $this->page_cache_key,
+            ));
+            return true;
+        }
+        return false;
+    }
+
+    private function ensure_page_cache_dir($dir = '') {
+        $base = $this->page_cache_dir();
+        $target = $dir ? $dir : $base;
+        if (!wp_mkdir_p($target)) {
+            return false;
+        }
+        if (!file_exists(trailingslashit($base) . 'index.html')) {
+            file_put_contents(trailingslashit($base) . 'index.html', '', LOCK_EX);
+        }
+        $htaccess = trailingslashit($base) . '.htaccess';
+        if (!file_exists($htaccess)) {
+            file_put_contents($htaccess, "Options -Indexes\n<IfModule mod_authz_core.c>\n    Require all granted\n</IfModule>\n", LOCK_EX);
+        }
+        return true;
+    }
+
+    private function update_page_cache_meta($data) {
+        $meta = get_option(self::PAGE_CACHE_META_OPTION, array());
+        if (!is_array($meta)) {
+            $meta = array();
+        }
+        $meta = array_merge($meta, $data);
+        update_option(self::PAGE_CACHE_META_OPTION, $meta, false);
     }
 
     public function flush_page_cache_on_content_change() {
@@ -1452,6 +1498,10 @@ final class WP_Large_Content_Optimizer {
             $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
             foreach ($iterator as $item) {
                 if ($item->isFile()) {
+                    $name = $item->getFilename();
+                    if (in_array($name, array('index.html', '.htaccess'), true)) {
+                        continue;
+                    }
                     $bytes += $item->getSize();
                     if (@unlink($item->getPathname())) {
                         $removed++;
@@ -1461,6 +1511,12 @@ final class WP_Large_Content_Optimizer {
                 }
             }
         }
+        $this->ensure_page_cache_dir();
+        $this->update_page_cache_meta(array(
+            'last_cleared' => time(),
+            'last_cleared_files' => $removed,
+            'last_cleared_bytes' => $bytes,
+        ));
         if (!$notice) {
             return array('type' => 'success', 'message' => '页面缓存已清理。');
         }
@@ -1477,7 +1533,7 @@ final class WP_Large_Content_Optimizer {
         if (is_dir($dir)) {
             $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
             foreach ($iterator as $item) {
-                if (!$item->isFile()) {
+                if (!$item->isFile() || in_array($item->getFilename(), array('index.html', '.htaccess'), true)) {
                     continue;
                 }
                 $files++;
@@ -1488,11 +1544,16 @@ final class WP_Large_Content_Optimizer {
             }
         }
         $ttl = min(DAY_IN_SECONDS, max(300, intval($settings['page_cache_ttl'])));
+        $meta = get_option(self::PAGE_CACHE_META_OPTION, array());
+        if (!is_array($meta)) {
+            $meta = array();
+        }
         $recommendations = array();
         if (empty($settings['page_cache_enabled'])) {
             $recommendations[] = '当前未开启本插件页面缓存；如果没有使用服务器级页面缓存，可在“设置”里开启。';
         } else {
             $recommendations[] = '页面缓存已开启。发布、删除文章或评论状态变化时会自动清空缓存，避免旧内容长期保留。';
+            $recommendations[] = '当前为轻量页面缓存模式，命中点在 template_redirect；如需更高收益，后续可升级 advanced-cache 高级模式。';
             $recommendations[] = '如服务器已有 Nginx FastCGI Cache、LiteSpeed Cache、WP Rocket 等页面缓存，建议二选一，避免重复缓存。';
         }
         if (!is_dir($dir)) {
@@ -1508,8 +1569,10 @@ final class WP_Large_Content_Optimizer {
             'bytes' => $bytes,
             'oldest' => $oldest,
             'newest' => $newest,
+            'last_generated' => isset($meta['last_generated']) ? intval($meta['last_generated']) : 0,
+            'last_cleared' => isset($meta['last_cleared']) ? intval($meta['last_cleared']) : 0,
             'dir' => $dir,
-            'recommendations' => array_slice($recommendations, 0, 5),
+            'recommendations' => array_slice($recommendations, 0, 6),
         );
     }
 
