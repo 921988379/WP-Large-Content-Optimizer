@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.6.0 - 2026-05-26
+
+### Added
+
+- 新增后台文章列表查询缓存。
+- 支持缓存相同筛选条件下的文章 ID 列表，文章更新/删除/回收后自动清理缓存。
+- 新增 Redis/Object Cache 深度检测。
+- 检测 object-cache.php drop-in、对象缓存类、Redis Cache 插件、缓存可写性，并给出建议。
+
 ## 2.5.0 - 2026-05-26
 
 ### Added

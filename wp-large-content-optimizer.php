@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速和定时维护。
- * Version: 2.5.0
+ * Version: 2.6.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '2.5.0';
+    const VERSION = '2.6.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const GITHUB_OWNER = '921988379';
@@ -42,6 +42,11 @@ final class WP_Large_Content_Optimizer {
         add_action('pre_get_posts', array($this, 'admin_list_fast_mode_query'), 20);
         add_filter('months_dropdown_results', array($this, 'admin_list_disable_months_dropdown'), 20, 2);
         add_filter('found_posts', array($this, 'admin_list_disable_found_posts'), 20, 2);
+        add_filter('posts_pre_query', array($this, 'admin_query_cache_pre'), 10, 2);
+        add_filter('the_posts', array($this, 'admin_query_cache_store'), 10, 2);
+        add_action('save_post', array($this, 'flush_admin_query_cache'));
+        add_action('deleted_post', array($this, 'flush_admin_query_cache'));
+        add_action('trashed_post', array($this, 'flush_admin_query_cache'));
         add_action('init', array($this, 'frontend_light_optimizations'));
         add_filter('pre_set_site_transient_update_plugins', array($this, 'check_github_update'));
         add_filter('plugins_api', array($this, 'github_plugin_info'), 20, 3);
@@ -81,6 +86,8 @@ final class WP_Large_Content_Optimizer {
             'admin_fast_title_search' => 1,
             'admin_fast_disable_months' => 1,
             'admin_fast_disable_found_rows' => 0,
+            'admin_query_cache' => 0,
+            'admin_query_cache_ttl' => 120,
             'frontend_disable_emoji' => 1,
             'frontend_disable_embeds' => 0,
             'frontend_disable_dashicons' => 0,
@@ -204,6 +211,80 @@ final class WP_Large_Content_Optimizer {
     }
 
 
+    private function admin_query_cache_enabled() {
+        $settings = $this->settings();
+        return !empty($settings['admin_query_cache']) && $this->is_admin_edit_posts_screen();
+    }
+
+    private function admin_query_cache_key($query) {
+        $vars = $query->query_vars;
+        unset($vars['cache_results'], $vars['update_post_meta_cache'], $vars['update_post_term_cache'], $vars['lazy_load_term_meta']);
+        ksort($vars);
+        return 'wplco_admin_q_' . md5(wp_json_encode($vars));
+    }
+
+    public function admin_query_cache_pre($posts, $query) {
+        if (!$query->is_main_query() || !$this->admin_query_cache_enabled()) {
+            return $posts;
+        }
+        if (!empty($query->query_vars['wplco_from_cache'])) {
+            return $posts;
+        }
+        $key = $this->admin_query_cache_key($query);
+        $cached = get_transient($key);
+        if (!is_array($cached) || empty($cached['ids'])) {
+            $query->query_vars['wplco_cache_key'] = $key;
+            return $posts;
+        }
+        $query->query_vars['wplco_from_cache'] = true;
+        $query->found_posts = isset($cached['found_posts']) ? intval($cached['found_posts']) : count($cached['ids']);
+        $query->max_num_pages = isset($cached['max_num_pages']) ? intval($cached['max_num_pages']) : 1;
+        $out = array();
+        foreach ($cached['ids'] as $id) {
+            $post = get_post(intval($id));
+            if ($post) {
+                $out[] = $post;
+            }
+        }
+        return $out;
+    }
+
+    public function admin_query_cache_store($posts, $query) {
+        if (!$query->is_main_query() || !$this->admin_query_cache_enabled()) {
+            return $posts;
+        }
+        if (!empty($query->query_vars['wplco_from_cache'])) {
+            return $posts;
+        }
+        $key = !empty($query->query_vars['wplco_cache_key']) ? $query->query_vars['wplco_cache_key'] : $this->admin_query_cache_key($query);
+        $ids = wp_list_pluck($posts, 'ID');
+        $settings = $this->settings();
+        set_transient($key, array(
+            'ids' => array_map('intval', $ids),
+            'found_posts' => intval($query->found_posts),
+            'max_num_pages' => intval($query->max_num_pages),
+        ), min(600, max(30, intval($settings['admin_query_cache_ttl']))));
+        $keys = get_option('wplco_admin_query_cache_keys', array());
+        if (!is_array($keys)) {
+            $keys = array();
+        }
+        $keys[$key] = time();
+        $keys = array_slice($keys, -200, null, true);
+        update_option('wplco_admin_query_cache_keys', $keys, false);
+        return $posts;
+    }
+
+    public function flush_admin_query_cache() {
+        $keys = get_option('wplco_admin_query_cache_keys', array());
+        if (is_array($keys)) {
+            foreach (array_keys($keys) as $key) {
+                delete_transient($key);
+            }
+        }
+        delete_option('wplco_admin_query_cache_keys');
+    }
+
+
     public function handle_post_actions() {
         if (!is_admin() || !current_user_can('manage_options')) {
             return;
@@ -276,6 +357,8 @@ final class WP_Large_Content_Optimizer {
         $settings['admin_fast_title_search'] = empty($_POST['admin_fast_title_search']) ? 0 : 1;
         $settings['admin_fast_disable_months'] = empty($_POST['admin_fast_disable_months']) ? 0 : 1;
         $settings['admin_fast_disable_found_rows'] = empty($_POST['admin_fast_disable_found_rows']) ? 0 : 1;
+        $settings['admin_query_cache'] = empty($_POST['admin_query_cache']) ? 0 : 1;
+        $settings['admin_query_cache_ttl'] = min(600, max(30, intval($_POST['admin_query_cache_ttl'] ?? 120)));
         $settings['frontend_disable_emoji'] = empty($_POST['frontend_disable_emoji']) ? 0 : 1;
         $settings['frontend_disable_embeds'] = empty($_POST['frontend_disable_embeds']) ? 0 : 1;
         $settings['frontend_disable_dashicons'] = empty($_POST['frontend_disable_dashicons']) ? 0 : 1;
@@ -552,6 +635,7 @@ final class WP_Large_Content_Optimizer {
         $duplicate_draft_groups = $report['duplicate_draft_groups'];
         $published_duplicate_groups = $report['published_duplicate_groups'];
         $frontend_report = $report['frontend_report'];
+        $object_cache_report = $report['object_cache_report'];
         $slow_risk_report = $report['slow_risk_report'];
         $cron_report = $report['cron_report'];
         $settings = $this->settings();
@@ -876,6 +960,17 @@ final class WP_Large_Content_Optimizer {
                         <?php endforeach; ?>
                     </ul>
                 <?php endif; ?>
+                <h3>Redis/Object Cache 深度检测</h3>
+                <div class="wplco-env">
+                    <?php foreach ($object_cache_report['checks'] as $item): ?>
+                        <div><strong><?php echo esc_html($item['label']); ?></strong><br><span class="<?php echo esc_attr($item['class']); ?>"><?php echo esc_html($item['value']); ?></span><?php if (!empty($item['hint'])): ?><p class="wplco-small" style="margin:4px 0 0"><?php echo esc_html($item['hint']); ?></p><?php endif; ?></div>
+                    <?php endforeach; ?>
+                </div>
+                <?php if (!empty($object_cache_report['recommendations'])): ?>
+                    <ul class="wplco-list">
+                        <?php foreach ($object_cache_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -969,6 +1064,8 @@ final class WP_Large_Content_Optimizer {
                     <label><input type="checkbox" name="admin_fast_title_search" value="1" <?php checked($settings['admin_fast_title_search']); ?>> 后台文章搜索优先按标题搜索，减少全文 LIKE 压力</label>
                     <label><input type="checkbox" name="admin_fast_disable_months" value="1" <?php checked($settings['admin_fast_disable_months']); ?>> 禁用文章列表月份下拉统计</label>
                     <label><input type="checkbox" name="admin_fast_disable_found_rows" value="1" <?php checked($settings['admin_fast_disable_found_rows']); ?>> 禁用精确总数统计 <span class="wplco-small">速度更快，但分页总数可能不准确；默认关闭。</span></label>
+                    <label><input type="checkbox" name="admin_query_cache" value="1" <?php checked($settings['admin_query_cache']); ?>> 启用后台文章列表查询缓存 <span class="wplco-small">缓存相同筛选条件下的文章 ID 列表；文章更新/删除后自动清理。默认关闭。</span></label>
+                    <label>查询缓存时间：<input class="wplco-number" type="number" name="admin_query_cache_ttl" min="30" max="600" value="<?php echo esc_attr($settings['admin_query_cache_ttl']); ?>"> 秒 <span class="wplco-small">建议 60-300 秒。</span></label>
                     <hr>
                     <h3>前台轻量优化</h3>
                     <label><input type="checkbox" name="frontend_disable_emoji" value="1" <?php checked($settings['frontend_disable_emoji']); ?>> 禁用 WordPress Emoji 脚本</label>
@@ -1159,6 +1256,47 @@ final class WP_Large_Content_Optimizer {
             wp_deregister_style('dashicons');
         }
     }
+
+    private function collect_object_cache_report() {
+        global $wp_object_cache;
+        $checks = array();
+        $recommendations = array();
+        if (!function_exists('is_plugin_active')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        $using = wp_using_ext_object_cache();
+        $dropin = file_exists(WP_CONTENT_DIR . '/object-cache.php');
+        $class = is_object($wp_object_cache) ? get_class($wp_object_cache) : 'none';
+        $redis_plugin = is_plugin_active('redis-cache/redis-cache.php');
+        $memcached_plugin = is_plugin_active('memcached-redux/object-cache.php') || is_plugin_active('w3-total-cache/w3-total-cache.php');
+
+        $checks[] = array('label' => '持久对象缓存', 'value' => $using ? '已启用' : '未启用', 'class' => $using ? 'wplco-ok' : 'wplco-warn', 'hint' => $using ? 'WordPress 正在使用外部对象缓存。' : '文章多时建议启用 Redis Object Cache。');
+        $checks[] = array('label' => 'object-cache.php drop-in', 'value' => $dropin ? '存在' : '不存在', 'class' => $dropin ? 'wplco-ok' : 'wplco-warn', 'hint' => $dropin ? '已安装对象缓存 drop-in。' : '未检测到对象缓存 drop-in。');
+        $checks[] = array('label' => '对象缓存类', 'value' => $class, 'class' => $using ? 'wplco-ok' : 'wplco-warn', 'hint' => '用于判断当前对象缓存实现。');
+        $checks[] = array('label' => 'Redis Cache 插件', 'value' => $redis_plugin ? '已启用' : '未启用/未安装', 'class' => $redis_plugin ? 'wplco-ok' : 'wplco-warn', 'hint' => '推荐大文章站使用 Redis Object Cache。');
+        $checks[] = array('label' => '缓存可写测试', 'value' => '待测试', 'class' => 'wplco-warn', 'hint' => '对象缓存可写性依赖当前 drop-in；建议在 Redis 插件页面查看连接状态。');
+
+        $test_key = 'wplco_object_cache_test_' . wp_generate_password(8, false);
+        wp_cache_set($test_key, 'ok', 'wplco', 30);
+        $test = wp_cache_get($test_key, 'wplco');
+        $checks[4]['value'] = $test === 'ok' ? '通过' : '失败';
+        $checks[4]['class'] = $test === 'ok' ? 'wplco-ok' : 'wplco-danger';
+
+        if (!$using) {
+            $recommendations[] = '建议启用 Redis Object Cache。WordPress 的 post、postmeta、term 查询会更容易命中对象缓存。';
+        }
+        if (!$dropin) {
+            $recommendations[] = '未检测到 object-cache.php drop-in，说明持久对象缓存大概率没有真正接管。';
+        }
+        if (!$redis_plugin && !$memcached_plugin) {
+            $recommendations[] = '未检测到常见 Redis/Memcached 缓存插件，建议安装 Redis Object Cache 或使用服务器提供的对象缓存方案。';
+        }
+        if ($using && $test === 'ok') {
+            $recommendations[] = '对象缓存基础状态正常。后续可关注 Redis 命中率、内存占用和 key 数量。';
+        }
+        return array('checks' => $checks, 'recommendations' => array_slice($recommendations, 0, 6));
+    }
+
 
     private function collect_frontend_report() {
         $settings = $this->settings();
@@ -1507,6 +1645,7 @@ final class WP_Large_Content_Optimizer {
             'duplicate_draft_groups' => $this->collect_duplicate_draft_groups(),
             'published_duplicate_groups' => $this->collect_published_duplicate_groups(),
             'frontend_report' => $this->collect_frontend_report(),
+            'object_cache_report' => $this->collect_object_cache_report(),
             'slow_risk_report' => $this->collect_slow_risk_report(),
             'cron_report' => $this->collect_cron_report(),
         );

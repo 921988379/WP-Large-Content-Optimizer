@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`2.5.0`
+`2.6.0`
 
 ## 后台入口
 
@@ -31,6 +31,8 @@ https://www.seoyh.net
 - JSON 诊断报告导出
 - 后台 AJAX 队列清理与进度条
 - WP-Cron 与采集任务检测
+- 后台文章列表查询缓存
+- Redis/Object Cache 深度检测
 
 ## 安全原则
 
