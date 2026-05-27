@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.5.0`
+`3.6.0`
 
 ## 后台入口
 
@@ -44,6 +44,9 @@ https://www.seoyh.net
 - 页面缓存手动预热与排除规则
 - Cron Hook 来源/回调识别
 - 诊断页轻量 Profiling
+- 核心数据表健康检查
+- 媒体文件存在性抽样
+- Action Scheduler 失败/超时任务样本
 - Multisite 兼容检测
 - 媒体库 MIME 与缺失文件路径检测
 - 慢查询 EXPLAIN 增强采样
@@ -59,6 +62,18 @@ https://www.seoyh.net
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.6.0 安全维护与可操作诊断增强
+
+3.6.0 继续把诊断从“看总数”推进到“能定位样本”，但仍保持保守只读/手动确认：
+
+- Action Scheduler 新增最近失败任务样本，展示 Hook、Group、计划时间、尝试次数和最近日志摘要
+- Action Scheduler 新增超时待执行任务样本，便于定位队列堵塞来源
+- 媒体库新增最近附件实际文件存在性抽样，帮助排查迁移、对象存储或上传目录不同步
+- 新增核心数据表健康检查，展示核心表引擎、估算行数、数据/索引体积、碎片、Auto Increment 和 Collation
+- 数据表健康检查只读取 `information_schema`，不自动执行 `OPTIMIZE`、`ALTER` 或任何写操作
+
+Action Scheduler 清理仍需管理员手动确认，且只清理 30 天前已完成/失败记录；媒体与数据库增强均不自动删除或修改数据。
 
 ## 3.5.0 慢查询、媒体库与多站点诊断增强
 

@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.5.0
+ * Version: 3.6.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.5.0';
+    const VERSION = '3.6.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -985,6 +985,7 @@ final class WP_Large_Content_Optimizer {
         $commerce_report = $report['commerce_report'];
         $explain_report = $report['explain_report'];
         $admin_filter_report = $report['admin_filter_report'];
+        $database_health_report = isset($report['database_health_report']) ? $report['database_health_report'] : array('tables' => array(), 'recommendations' => array());
         $multisite_report = isset($report['multisite_report']) ? $report['multisite_report'] : array('checks' => array(), 'recommendations' => array());
         $runtime_profile_report = isset($report['runtime_profile_report']) ? $report['runtime_profile_report'] : array('checks' => array(), 'recommendations' => array());
         $settings = $this->settings();
@@ -1412,6 +1413,15 @@ final class WP_Large_Content_Optimizer {
                     <h3>Action Scheduler Hook TOP</h3>
                     <table class="wplco-table"><thead><tr><th>Hook</th><th>状态</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['top_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['status']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
                 <?php endif; ?>
+                <?php if (!empty($commerce_report['failed_samples'])): ?>
+                    <h3>最近失败任务样本</h3>
+                    <table class="wplco-table"><thead><tr><th>ID</th><th>Hook</th><th>Group</th><th>计划时间 GMT</th><th>尝试</th><th>最近日志</th></tr></thead><tbody><?php foreach ($commerce_report['failed_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['group']); ?></code></td><td><?php echo esc_html($row['scheduled']); ?></td><td><?php echo esc_html(number_format_i18n($row['attempts'])); ?></td><td><?php echo esc_html($row['message']); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <p class="wplco-small">失败任务样本仅用于定位原因；清理失败记录前建议先确认 Hook 来源和最近日志。</p>
+                <?php endif; ?>
+                <?php if (!empty($commerce_report['stale_pending_samples'])): ?>
+                    <h3>超时待执行任务样本</h3>
+                    <table class="wplco-table"><thead><tr><th>ID</th><th>Hook</th><th>Group</th><th>计划时间 GMT</th><th>尝试</th></tr></thead><tbody><?php foreach ($commerce_report['stale_pending_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['group']); ?></code></td><td><?php echo esc_html($row['scheduled']); ?></td><td><?php echo esc_html(number_format_i18n($row['attempts'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
                 <p>
                     <?php $this->action_button('clean_completed_actions', '清理 30 天前已完成任务', '只会清理 30 天前已完成的 Action Scheduler 记录和日志，单次最多 500 条。确定继续？'); ?>
                     <?php $this->action_button('clean_failed_actions', '清理 30 天前失败任务', '建议先确认失败原因。只会清理 30 天前失败的 Action Scheduler 记录和日志，单次最多 500 条。确定继续？', 'delete'); ?>
@@ -1556,11 +1566,16 @@ final class WP_Large_Content_Optimizer {
                         <h3>附件 MIME TOP</h3>
                         <table class="wplco-table"><thead><tr><th>MIME</th><th>数量</th></tr></thead><tbody><?php foreach ($media_report['mime_types'] as $row): ?><tr><td><code><?php echo esc_html($row['mime']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
                     <?php endif; ?>
+                    <?php if (!empty($media_report['physical_missing_samples'])): ?>
+                        <h3>最近附件文件缺失样本</h3>
+                        <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>相对路径</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['physical_missing_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><code><?php echo esc_html($row['path']); ?></code></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
+                        <p class="wplco-small">只抽查最近 40 个有文件路径的附件，避免全量遍历上传目录造成 IO 压力。</p>
+                    <?php endif; ?>
                     <?php if (!empty($media_report['samples'])): ?>
                         <h3>待审查附件样本</h3>
                         <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>问题</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><span class="wplco-warn"><?php echo esc_html($row['issue']); ?></span></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
                     <?php endif; ?>
-                    <p class="wplco-small">媒体库只读体检，不自动删除附件。未挂载不一定是垃圾，可能被主题/字段引用；缺少元数据建议先单个再生缩略图确认。</p>
+                    <p class="wplco-small">媒体库只读体检，不自动删除附件、不自动再生缩略图。未挂载不一定是垃圾，可能被主题/字段引用；文件缺失样本只用于迁移/对象存储排查。</p>
                 </div>
                 <div class="wplco-card">
                     <h2>插件/主题体检</h2>
@@ -1583,6 +1598,17 @@ final class WP_Large_Content_Optimizer {
                     <div><strong>策略</strong><br><span><?php echo esc_html($admin_filter_report['mode']); ?></span></div>
                 </div>
                 <ul class="wplco-list"><?php foreach ($admin_filter_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul>
+            </div>
+
+            <div class="wplco-card" style="margin-top:16px">
+                <h2>核心数据表健康检查</h2>
+                <p class="wplco-small">只读读取 information_schema，展示核心表引擎、估算行数、数据/索引体积、碎片和 Collation。不自动执行 OPTIMIZE/ALTER。</p>
+                <?php if (!empty($database_health_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($database_health_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
+                <table class="wplco-table"><thead><tr><th>表</th><th>引擎</th><th>估算行数</th><th>数据</th><th>索引</th><th>碎片</th><th>Auto Increment</th><th>Collation</th><th>风险</th></tr></thead><tbody>
+                <?php foreach ($database_health_report['tables'] as $row): ?>
+                    <tr><td><code><?php echo esc_html($row['table']); ?></code></td><td><?php echo esc_html($row['engine']); ?></td><td><?php echo esc_html(number_format_i18n($row['rows'])); ?></td><td><?php echo esc_html($this->format_bytes($row['data'])); ?></td><td><?php echo esc_html($this->format_bytes($row['index'])); ?></td><td><?php echo esc_html($this->format_bytes($row['free'])); ?></td><td><?php echo esc_html(number_format_i18n($row['auto_increment'])); ?></td><td><code><?php echo esc_html($row['collation']); ?></code></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['risk']); ?></span></td></tr>
+                <?php endforeach; ?>
+                </tbody></table>
             </div>
 
             <div class="wplco-card" style="margin-top:16px">
@@ -1760,7 +1786,7 @@ final class WP_Large_Content_Optimizer {
                 var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
-                    'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
+                    'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','核心数据表健康检查':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
                     'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
                     '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
@@ -3134,6 +3160,8 @@ PHP;
         $top_hooks = array();
         $status_rows = array();
         $group_rows = array();
+        $failed_samples = array();
+        $stale_pending_samples = array();
         $oldest_pending = '';
         if ($has_actions) {
             $pending = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='pending'"));
@@ -3157,6 +3185,36 @@ PHP;
                 foreach ((array) $rows as $row) {
                     $group_rows[] = array('group' => $row['slug'] ? $row['slug'] : '(none)', 'count' => intval($row['total']));
                 }
+            }
+            $has_groups = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $groups_table)) === $groups_table;
+            $has_logs = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->prefix . 'actionscheduler_logs')) === $wpdb->prefix . 'actionscheduler_logs';
+            $group_select = $has_groups ? ', g.slug AS group_slug' : ', NULL AS group_slug';
+            $group_join = $has_groups ? " LEFT JOIN {$groups_table} g ON a.group_id=g.group_id" : '';
+            $rows = $wpdb->get_results("SELECT a.action_id, a.hook, a.status, a.scheduled_date_gmt, a.last_attempt_gmt, a.attempts{$group_select} FROM {$actions_table} a{$group_join} WHERE a.status='failed' ORDER BY a.scheduled_date_gmt DESC LIMIT 8", ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $message = '';
+                if ($has_logs) {
+                    $message = (string) $wpdb->get_var($wpdb->prepare("SELECT message FROM {$wpdb->prefix}actionscheduler_logs WHERE action_id=%d ORDER BY log_date_gmt DESC LIMIT 1", intval($row['action_id'])));
+                }
+                $failed_samples[] = array(
+                    'id' => intval($row['action_id']),
+                    'hook' => (string) $row['hook'],
+                    'group' => !empty($row['group_slug']) ? (string) $row['group_slug'] : '(none)',
+                    'scheduled' => (string) $row['scheduled_date_gmt'],
+                    'last_attempt' => (string) $row['last_attempt_gmt'],
+                    'attempts' => isset($row['attempts']) ? intval($row['attempts']) : 0,
+                    'message' => wp_trim_words(wp_strip_all_tags($message), 18, '…'),
+                );
+            }
+            $rows = $wpdb->get_results($wpdb->prepare("SELECT a.action_id, a.hook, a.status, a.scheduled_date_gmt, a.last_attempt_gmt, a.attempts{$group_select} FROM {$actions_table} a{$group_join} WHERE a.status='pending' AND a.scheduled_date_gmt < %s ORDER BY a.scheduled_date_gmt ASC LIMIT 8", gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS)), ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $stale_pending_samples[] = array(
+                    'id' => intval($row['action_id']),
+                    'hook' => (string) $row['hook'],
+                    'group' => !empty($row['group_slug']) ? (string) $row['group_slug'] : '(none)',
+                    'scheduled' => (string) $row['scheduled_date_gmt'],
+                    'attempts' => isset($row['attempts']) ? intval($row['attempts']) : 0,
+                );
             }
         }
         $recommendations = array();
@@ -3197,6 +3255,8 @@ PHP;
             'top_hooks' => $top_hooks,
             'status_rows' => $status_rows,
             'group_rows' => $group_rows,
+            'failed_samples' => $failed_samples,
+            'stale_pending_samples' => $stale_pending_samples,
             'recommendations' => array_slice($recommendations, 0, 8),
         );
     }
@@ -3342,6 +3402,30 @@ PHP;
         foreach ((array) $mime_rows as $row) {
             $mime_types[] = array('mime' => $row['mime'] !== '' ? $row['mime'] : '(empty)', 'count' => intval($row['total']));
         }
+        $physical_missing_samples = array();
+        $upload_dir = wp_upload_dir();
+        $base_dir = !empty($upload_dir['basedir']) ? trailingslashit($upload_dir['basedir']) : '';
+        if ($base_dir !== '') {
+            $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, pm.meta_value AS file_path FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} pm ON pm.post_id=p.ID AND pm.meta_key=%s WHERE p.post_type=%s AND pm.meta_value<>'' ORDER BY p.ID DESC LIMIT 40", '_wp_attached_file', 'attachment'), ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $relative = ltrim((string) $row['file_path'], '/\\');
+                if ($relative === '' || strpos($relative, '..') !== false) {
+                    continue;
+                }
+                $full = $base_dir . $relative;
+                if (!file_exists($full)) {
+                    $physical_missing_samples[] = array(
+                        'id' => intval($row['ID']),
+                        'title' => $row['post_title'] !== '' ? $row['post_title'] : '(无标题)',
+                        'path' => $relative,
+                        'edit_url' => get_edit_post_link(intval($row['ID']), ''),
+                    );
+                    if (count($physical_missing_samples) >= 8) {
+                        break;
+                    }
+                }
+            }
+        }
         $samples = array();
         $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, CASE WHEN filepm.meta_id IS NULL THEN %s WHEN metapm.meta_id IS NULL THEN %s WHEN p.post_parent=0 THEN %s ELSE %s END AS issue FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} metapm ON metapm.post_id=p.ID AND metapm.meta_key=%s LEFT JOIN {$wpdb->postmeta} filepm ON filepm.post_id=p.ID AND filepm.meta_key=%s WHERE p.post_type=%s AND (p.post_parent=0 OR metapm.meta_id IS NULL OR filepm.meta_id IS NULL) ORDER BY p.ID DESC LIMIT 12", '缺少文件路径', '缺少元数据', '未挂载', '需审查', '_wp_attachment_metadata', '_wp_attached_file', 'attachment'), ARRAY_A);
         foreach ((array) $rows as $row) {
@@ -3365,13 +3449,16 @@ PHP;
         if ($missing_file > 0) {
             $recommendations[] = '存在缺少 _wp_attached_file 的附件，可能是导入/迁移异常；建议先抽样确认文件是否存在。';
         }
+        if (!empty($physical_missing_samples)) {
+            $recommendations[] = '最近附件样本中发现数据库记录对应的实际文件不存在，建议检查上传目录、迁移路径或对象存储同步。';
+        }
         if ($large_originals > 1000) {
             $recommendations[] = '较多附件元数据很大，可能由超多缩略图尺寸或图片处理插件造成；建议审查缩略图尺寸策略。';
         }
         if (empty($recommendations)) {
             $recommendations[] = '媒体库基础状态正常。';
         }
-        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'missing_file' => $missing_file, 'large_originals' => $large_originals, 'mime_types' => $mime_types, 'samples' => $samples, 'recommendations' => $recommendations);
+        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'missing_file' => $missing_file, 'large_originals' => $large_originals, 'mime_types' => $mime_types, 'physical_missing_samples' => $physical_missing_samples, 'samples' => $samples, 'recommendations' => $recommendations);
     }
 
     private function collect_advanced_cache_report() {
@@ -3429,6 +3516,54 @@ PHP;
         }
         $theme = wp_get_theme();
         return array('active_plugins' => count($active), 'cache_plugins' => count($notable), 'notable_plugins' => array_slice($notable, 0, 12), 'theme' => $theme->get('Name') . ' ' . $theme->get('Version'), 'recommendations' => $recommendations);
+    }
+
+    private function collect_database_health_report() {
+        global $wpdb;
+        $tables = array($wpdb->posts, $wpdb->postmeta, $wpdb->options, $wpdb->term_relationships, $wpdb->term_taxonomy, $wpdb->terms);
+        $rows = array();
+        $recommendations = array();
+        $db_name = DB_NAME;
+        foreach ($tables as $table) {
+            $row = $wpdb->get_row($wpdb->prepare("SELECT TABLE_NAME, ENGINE, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH, DATA_FREE, AUTO_INCREMENT, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s", $db_name, $table), ARRAY_A);
+            if (!$row) {
+                continue;
+            }
+            $data = intval($row['DATA_LENGTH']);
+            $index = intval($row['INDEX_LENGTH']);
+            $free = intval($row['DATA_FREE']);
+            $total = $data + $index;
+            $class = 'wplco-ok';
+            $risk = '低';
+            if ($free > 256 * 1024 * 1024 || $total > 1024 * 1024 * 1024) {
+                $class = 'wplco-warn';
+                $risk = '中：表体积或碎片较大';
+            }
+            if (!empty($row['ENGINE']) && strtoupper($row['ENGINE']) !== 'INNODB') {
+                $class = 'wplco-danger';
+                $risk = '高：非 InnoDB 引擎';
+                $recommendations[] = $table . ' 不是 InnoDB，引擎混用可能影响并发与锁表现，建议先备份后由 DBA 评估转换。';
+            }
+            if ($free > 256 * 1024 * 1024) {
+                $recommendations[] = $table . ' 的 DATA_FREE 较高，可能有碎片；大表 OPTIMIZE/重建会锁表或产生 IO，建议低峰期备份后操作。';
+            }
+            $rows[] = array(
+                'table' => $table,
+                'engine' => $row['ENGINE'] ?: '-',
+                'rows' => intval($row['TABLE_ROWS']),
+                'data' => $data,
+                'index' => $index,
+                'free' => $free,
+                'auto_increment' => isset($row['AUTO_INCREMENT']) ? intval($row['AUTO_INCREMENT']) : 0,
+                'collation' => $row['TABLE_COLLATION'] ?: '-',
+                'risk' => $risk,
+                'class' => $class,
+            );
+        }
+        if (empty($recommendations)) {
+            $recommendations[] = '核心表引擎/体积未发现明显异常；如需 OPTIMIZE 或加索引，建议先备份并在低峰期执行。';
+        }
+        return array('tables' => $rows, 'recommendations' => array_slice($recommendations, 0, 8));
     }
 
     private function collect_multisite_report() {
@@ -3525,6 +3660,7 @@ PHP;
             'commerce_report' => $this->collect_commerce_report(),
             'explain_report' => $this->collect_explain_report(),
             'admin_filter_report' => $this->collect_admin_filter_report(),
+            'database_health_report' => $this->collect_database_health_report(),
             'multisite_report' => $this->collect_multisite_report(),
         );
         $report['runtime_profile_report'] = $this->collect_runtime_profile_report($profile_started, $profile_start_queries, false);

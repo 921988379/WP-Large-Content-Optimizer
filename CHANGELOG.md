@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.6.0 - 2026-05-27
+
+### Added
+
+- Action Scheduler 新增最近失败任务样本，展示 Hook、Group、计划时间、尝试次数和最近日志摘要。
+- Action Scheduler 新增超时待执行任务样本，便于定位队列堵塞来源。
+- 媒体库新增最近附件实际文件存在性抽样，帮助排查迁移、对象存储或上传目录不同步。
+- 新增核心数据表健康检查，展示核心表引擎、估算行数、数据/索引体积、碎片、Auto Increment 和 Collation。
+
+### Safety
+
+- 数据表健康检查只读取 information_schema，不自动执行 OPTIMIZE、ALTER 或任何写操作。
+- 媒体文件存在性检查只抽样最近附件，不全量遍历上传目录，不删除附件或文件。
+- Action Scheduler 清理逻辑保持手动确认、30 天前、单次最多 500 条。
+
 ## 3.5.0 - 2026-05-26
 
 ### Added
