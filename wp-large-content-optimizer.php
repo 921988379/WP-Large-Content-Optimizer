@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.7.0
+ * Version: 3.8.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.7.0';
+    const VERSION = '3.8.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -988,7 +988,15 @@ final class WP_Large_Content_Optimizer {
             $plugin_theme_report['active_plugin_details'] = array();
         }
         $trend_report = $report['trend_report'];
+        if (empty($trend_report['sparklines'])) {
+            $trend_report['sparklines'] = array();
+        }
         $commerce_report = $report['commerce_report'];
+        foreach (array('failed_hook_rows','failed_group_rows','stale_pending_hook_rows') as $key) {
+            if (empty($commerce_report[$key])) {
+                $commerce_report[$key] = array();
+            }
+        }
         $explain_report = $report['explain_report'];
         $admin_filter_report = $report['admin_filter_report'];
         $database_health_report = isset($report['database_health_report']) ? $report['database_health_report'] : array('tables' => array(), 'recommendations' => array());
@@ -1433,6 +1441,18 @@ final class WP_Large_Content_Optimizer {
                     <h3>Action Scheduler Hook TOP</h3>
                     <table class="wplco-table"><thead><tr><th>Hook</th><th>状态</th><th>数量</th></tr></thead><tbody><?php foreach ($commerce_report['top_hooks'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['status']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td></tr><?php endforeach; ?></tbody></table>
                 <?php endif; ?>
+                <?php if (!empty($commerce_report['failed_hook_rows'])): ?>
+                    <h3>失败 Hook TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>失败数</th><th>最近失败 GMT</th></tr></thead><tbody><?php foreach ($commerce_report['failed_hook_rows'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['latest']); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
+                <?php if (!empty($commerce_report['failed_group_rows'])): ?>
+                    <h3>失败 Group TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Group</th><th>失败数</th><th>最近失败 GMT</th></tr></thead><tbody><?php foreach ($commerce_report['failed_group_rows'] as $row): ?><tr><td><code><?php echo esc_html($row['group']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['latest']); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
+                <?php if (!empty($commerce_report['stale_pending_hook_rows'])): ?>
+                    <h3>超时待执行 Hook TOP</h3>
+                    <table class="wplco-table"><thead><tr><th>Hook</th><th>超时待执行数</th><th>最早计划 GMT</th></tr></thead><tbody><?php foreach ($commerce_report['stale_pending_hook_rows'] as $row): ?><tr><td><code><?php echo esc_html($row['hook']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($row['oldest']); ?></td></tr><?php endforeach; ?></tbody></table>
+                <?php endif; ?>
                 <?php if (!empty($commerce_report['failed_samples'])): ?>
                     <h3>最近失败任务样本</h3>
                     <table class="wplco-table"><thead><tr><th>ID</th><th>Hook</th><th>Group</th><th>计划时间 GMT</th><th>尝试</th><th>最近日志</th></tr></thead><tbody><?php foreach ($commerce_report['failed_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><code><?php echo esc_html($row['hook']); ?></code></td><td><code><?php echo esc_html($row['group']); ?></code></td><td><?php echo esc_html($row['scheduled']); ?></td><td><?php echo esc_html(number_format_i18n($row['attempts'])); ?></td><td><?php echo esc_html($row['message']); ?></td></tr><?php endforeach; ?></tbody></table>
@@ -1710,6 +1730,13 @@ final class WP_Large_Content_Optimizer {
             <div class="wplco-card" style="margin-top:16px">
                 <h2>性能趋势记录</h2>
                 <p class="wplco-small">每次刷新诊断时记录关键指标，最多保留最近 30 次。用于观察清理/优化后数据是否真的下降。</p>
+                <?php if (!empty($trend_report['sparklines'])): ?>
+                    <div class="wplco-env">
+                        <?php foreach ($trend_report['sparklines'] as $row): ?>
+                            <div><strong><?php echo esc_html($row['label']); ?></strong><br><span class="wplco-metric <?php echo esc_attr($row['class']); ?>"><?php echo esc_html($row['sparkline']); ?></span><p class="wplco-small" style="margin:4px 0 0">最新：<?php echo esc_html(number_format_i18n($row['latest'])); ?></p></div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
                 <table class="wplco-table">
                     <thead><tr><th>时间</th><th>健康分</th><th>wp_posts</th><th>postmeta</th><th>autoload 数量</th><th>过期 transient</th></tr></thead>
                     <tbody>
@@ -1822,7 +1849,7 @@ final class WP_Large_Content_Optimizer {
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
                     'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','Transient 深度概览':'database','wp_options 前缀体积 TOP':'database','推荐数据库索引':'database','核心数据表健康检查':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
-                    'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
+                    'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron','失败 Hook TOP':'cron','失败 Group TOP':'cron','超时待执行 Hook TOP':'cron',
                     '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','最近附件大文件 TOP':'frontend','缺少缩略图 sizes 样本':'frontend','插件/主题体检':'frontend','启用插件体积 TOP':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
@@ -3116,6 +3143,26 @@ PHP;
     }
 
 
+    private function sparkline_values($values) {
+        $values = array_values(array_map('intval', (array) $values));
+        if (empty($values)) {
+            return '';
+        }
+        $blocks = array('▁','▂','▃','▄','▅','▆','▇','█');
+        $min = min($values);
+        $max = max($values);
+        if ($max === $min) {
+            return str_repeat('▁', count($values));
+        }
+        $out = '';
+        foreach ($values as $value) {
+            $idx = (int) round(($value - $min) * (count($blocks) - 1) / max(1, $max - $min));
+            $idx = max(0, min(count($blocks) - 1, $idx));
+            $out .= $blocks[$idx];
+        }
+        return $out;
+    }
+
     private function collect_trend_report($stats) {
         $history = get_option('wplco_trend_history', array());
         if (!is_array($history)) {
@@ -3153,7 +3200,24 @@ PHP;
             $delta_posts = intval($latest['posts']) - intval($first['posts']);
             $summary = '最近 ' . count($history) . ' 次记录：wp_posts 变化 ' . number_format_i18n($delta_posts) . '，postmeta 变化 ' . number_format_i18n($delta_meta) . '。';
         }
-        return array('history' => array_reverse($history), 'summary' => $summary, 'deltas' => $deltas);
+        $sparklines = array();
+        if (!empty($history)) {
+            $metric_labels = array('score' => '健康分', 'posts' => 'wp_posts', 'postmeta' => 'postmeta', 'autoload' => 'autoload 数量', 'expired_transients' => '过期 transient');
+            foreach ($metric_labels as $key => $label) {
+                $values = array();
+                foreach ($history as $row) {
+                    $values[] = isset($row[$key]) ? intval($row[$key]) : 0;
+                }
+                $latest = !empty($values) ? end($values) : 0;
+                $sparklines[] = array(
+                    'label' => $label,
+                    'sparkline' => $this->sparkline_values($values),
+                    'latest' => intval($latest),
+                    'class' => $key === 'score' ? 'wplco-ok' : 'wplco-warn',
+                );
+            }
+        }
+        return array('history' => array_reverse($history), 'summary' => $summary, 'deltas' => $deltas, 'sparklines' => $sparklines);
     }
 
     private function clean_action_scheduler_actions($status) {
@@ -3196,6 +3260,9 @@ PHP;
         $group_rows = array();
         $failed_samples = array();
         $stale_pending_samples = array();
+        $failed_hook_rows = array();
+        $failed_group_rows = array();
+        $stale_pending_hook_rows = array();
         $oldest_pending = '';
         if ($has_actions) {
             $pending = intval($wpdb->get_var("SELECT COUNT(*) FROM {$actions_table} WHERE status='pending'"));
@@ -3210,6 +3277,14 @@ PHP;
             foreach ((array) $rows as $row) {
                 $top_hooks[] = array('hook' => $row['hook'], 'status' => $row['status'], 'count' => intval($row['total']));
             }
+            $rows = $wpdb->get_results("SELECT hook, COUNT(*) AS total, MAX(scheduled_date_gmt) AS latest FROM {$actions_table} WHERE status='failed' GROUP BY hook ORDER BY total DESC LIMIT 8", ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $failed_hook_rows[] = array('hook' => (string) $row['hook'], 'count' => intval($row['total']), 'latest' => (string) $row['latest']);
+            }
+            $rows = $wpdb->get_results($wpdb->prepare("SELECT hook, COUNT(*) AS total, MIN(scheduled_date_gmt) AS oldest FROM {$actions_table} WHERE status='pending' AND scheduled_date_gmt < %s GROUP BY hook ORDER BY total DESC LIMIT 8", gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS)), ARRAY_A);
+            foreach ((array) $rows as $row) {
+                $stale_pending_hook_rows[] = array('hook' => (string) $row['hook'], 'count' => intval($row['total']), 'oldest' => (string) $row['oldest']);
+            }
             $rows = $wpdb->get_results("SELECT status, COUNT(*) AS total FROM {$actions_table} GROUP BY status ORDER BY total DESC", ARRAY_A);
             foreach ((array) $rows as $row) {
                 $status_rows[] = array('status' => $row['status'], 'count' => intval($row['total']));
@@ -3218,6 +3293,10 @@ PHP;
                 $rows = $wpdb->get_results("SELECT g.slug, COUNT(*) AS total FROM {$actions_table} a LEFT JOIN {$groups_table} g ON a.group_id=g.group_id WHERE a.status IN ('pending','failed','in-progress') GROUP BY g.slug ORDER BY total DESC LIMIT 8", ARRAY_A);
                 foreach ((array) $rows as $row) {
                     $group_rows[] = array('group' => $row['slug'] ? $row['slug'] : '(none)', 'count' => intval($row['total']));
+                }
+                $rows = $wpdb->get_results("SELECT g.slug, COUNT(*) AS total, MAX(a.scheduled_date_gmt) AS latest FROM {$actions_table} a LEFT JOIN {$groups_table} g ON a.group_id=g.group_id WHERE a.status='failed' GROUP BY g.slug ORDER BY total DESC LIMIT 8", ARRAY_A);
+                foreach ((array) $rows as $row) {
+                    $failed_group_rows[] = array('group' => $row['slug'] ? $row['slug'] : '(none)', 'count' => intval($row['total']), 'latest' => (string) $row['latest']);
                 }
             }
             $has_groups = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $groups_table)) === $groups_table;
@@ -3263,6 +3342,9 @@ PHP;
         }
         if ($failed > 0) {
             $recommendations[] = '存在失败 Action Scheduler 任务，建议先查看失败原因；30 天前的失败记录可手动清理。';
+            if (!empty($failed_hook_rows)) {
+                $recommendations[] = '失败 Hook TOP 可帮助定位问题来源，优先检查数量最多或最近持续失败的 Hook。';
+            }
         }
         if ($old_complete > 1000) {
             $recommendations[] = '30 天前已完成 Action Scheduler 记录较多，可分批清理以降低数据表体积。';
@@ -3289,6 +3371,9 @@ PHP;
             'top_hooks' => $top_hooks,
             'status_rows' => $status_rows,
             'group_rows' => $group_rows,
+            'failed_hook_rows' => $failed_hook_rows,
+            'failed_group_rows' => $failed_group_rows,
+            'stale_pending_hook_rows' => $stale_pending_hook_rows,
             'failed_samples' => $failed_samples,
             'stale_pending_samples' => $stale_pending_samples,
             'recommendations' => array_slice($recommendations, 0, 8),

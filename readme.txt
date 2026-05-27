@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 3.7.0
+Stable tag: 3.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -51,6 +51,9 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * 诊断页轻量 Profiling
 * 核心数据表健康检查
 * 启用插件目录体积 TOP
+* 性能趋势 sparkline
+* 超时待执行 Hook TOP
+* Action Scheduler 失败 Hook/Group TOP
 * 媒体大文件 TOP 与缺少缩略图样本
 * Transient 深度概览与 wp_options 前缀体积 TOP
 * 媒体文件存在性抽样
@@ -107,6 +110,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 3.8.0 会自动重试或删除 Action Scheduler 任务吗？ =
+
+不会。3.8.0 新增失败 Hook/Group TOP 和超时待执行 Hook TOP 都是只读定位信息；清理仍仅限管理员手动确认的 30 天前记录，且单次最多 500 条。
 
 = 3.7.0 的目录体积扫描会修改插件或主题文件吗？ =
 

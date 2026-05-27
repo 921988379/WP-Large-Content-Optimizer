@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.8.0 - 2026-05-27
+
+### Added
+
+- Action Scheduler 新增失败 Hook TOP，展示失败次数和最近失败时间。
+- Action Scheduler 新增失败 Group TOP，帮助定位 WooCommerce/插件队列来源。
+- Action Scheduler 新增超时待执行 Hook TOP，展示超时待执行数量和最早计划时间。
+- 性能趋势记录新增轻量 sparkline，快速观察关键指标变化方向。
+
+### Safety
+
+- Action Scheduler 新增能力均为只读诊断，不自动重试任务、不删除新记录、不修改业务数据。
+- 趋势 sparkline 仅读取本插件已有趋势记录，不新增前台请求写入。
+
 ## 3.7.0 - 2026-05-27
 
 ### Added

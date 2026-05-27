@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.7.0`
+`3.8.0`
 
 ## 后台入口
 
@@ -46,6 +46,9 @@ https://www.seoyh.net
 - 诊断页轻量 Profiling
 - 核心数据表健康检查
 - 启用插件目录体积 TOP
+- 性能趋势 sparkline
+- 超时待执行 Hook TOP
+- Action Scheduler 失败 Hook/Group TOP
 - 媒体大文件 TOP 与缺少缩略图样本
 - Transient 深度概览与 wp_options 前缀体积 TOP
 - 媒体文件存在性抽样
@@ -65,6 +68,17 @@ https://www.seoyh.net
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.8.0 任务队列定位与趋势可视化增强
+
+3.8.0 继续加强只读诊断能力，重点帮助定位 Action Scheduler 堵塞/失败来源，并让趋势变化更直观：
+
+- Action Scheduler 新增失败 Hook TOP，展示失败次数与最近失败时间
+- Action Scheduler 新增失败 Group TOP，帮助定位 WooCommerce/插件队列来源
+- Action Scheduler 新增超时待执行 Hook TOP，展示超时待执行数量与最早计划时间
+- 性能趋势记录新增轻量 sparkline，可快速观察健康分、wp_posts、postmeta、autoload 与过期 transient 的变化方向
+
+这些增强只读取 Action Scheduler 数据表和本插件趋势记录，不自动重试任务、不删除新记录、不修改业务数据。
 
 ## 3.7.0 选项、媒体与插件体积诊断增强
 
