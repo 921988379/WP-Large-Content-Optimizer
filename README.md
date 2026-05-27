@@ -9,7 +9,7 @@ https://www.seoyh.net
 
 ## 当前版本
 
-`3.6.0`
+`3.7.0`
 
 ## 后台入口
 
@@ -45,6 +45,9 @@ https://www.seoyh.net
 - Cron Hook 来源/回调识别
 - 诊断页轻量 Profiling
 - 核心数据表健康检查
+- 启用插件目录体积 TOP
+- 媒体大文件 TOP 与缺少缩略图样本
+- Transient 深度概览与 wp_options 前缀体积 TOP
 - 媒体文件存在性抽样
 - Action Scheduler 失败/超时任务样本
 - Multisite 兼容检测
@@ -62,6 +65,18 @@ https://www.seoyh.net
 - 媒体库只读体检
 - 高级缓存就绪检查
 - Heartbeat 控制与后台 AJAX 诊断
+
+## 3.7.0 选项、媒体与插件体积诊断增强
+
+3.7.0 继续补齐只读可视化诊断，让管理员更容易定位“体积从哪里来”：
+
+- Autoload 优化器新增 Transient 深度概览：过期 timeout、timeout 行、transient 行和 transient 体积
+- 新增 `wp_options` 前缀体积 TOP，帮助定位插件/主题写入的大量 option
+- 媒体库新增最近附件大文件 TOP 和缺少缩略图 sizes 样本
+- 插件/主题体检新增启用插件目录体积 TOP、文件数和主题目录体积
+- 插件目录扫描限制文件数，只读展示，用于发现日志、缓存、备份包或临时文件堆积
+
+所有新增能力仍为只读诊断，不删除媒体文件、不清理非过期 transient、不修改插件/主题目录。
 
 ## 3.6.0 安全维护与可操作诊断增强
 

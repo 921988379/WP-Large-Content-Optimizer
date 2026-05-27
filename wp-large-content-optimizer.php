@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.6.0
+ * Version: 3.7.0
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.6.0';
+    const VERSION = '3.7.0';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -981,6 +981,12 @@ final class WP_Large_Content_Optimizer {
         $media_report = $report['media_report'];
         $advanced_cache_report = $report['advanced_cache_report'];
         $plugin_theme_report = $report['plugin_theme_report'];
+        if (empty($plugin_theme_report['theme_size']) || !is_array($plugin_theme_report['theme_size'])) {
+            $plugin_theme_report['theme_size'] = array('bytes' => 0, 'files' => 0, 'truncated' => false);
+        }
+        if (empty($plugin_theme_report['active_plugin_details'])) {
+            $plugin_theme_report['active_plugin_details'] = array();
+        }
         $trend_report = $report['trend_report'];
         $commerce_report = $report['commerce_report'];
         $explain_report = $report['explain_report'];
@@ -1170,6 +1176,20 @@ final class WP_Large_Content_Optimizer {
                         </tr>
                     <?php endforeach; ?>
                     </tbody></table>
+                    <?php if (!empty($autoload_optimizer_report['transient_report'])): ?>
+                        <h3>Transient 深度概览</h3>
+                        <div class="wplco-env">
+                            <div><strong>过期 timeout</strong><br><span class="wplco-metric <?php echo $autoload_optimizer_report['transient_report']['expired_timeouts'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($autoload_optimizer_report['transient_report']['expired_timeouts'])); ?></span></div>
+                            <div><strong>timeout 行</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($autoload_optimizer_report['transient_report']['timeout_rows'])); ?></span></div>
+                            <div><strong>transient 行</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($autoload_optimizer_report['transient_report']['transient_rows'])); ?></span></div>
+                            <div><strong>transient 体积</strong><br><span class="wplco-metric"><?php echo esc_html($this->format_bytes($autoload_optimizer_report['transient_report']['bytes'])); ?></span></div>
+                        </div>
+                        <p class="wplco-small">这里仍只读展示；清理过期 transient 请使用上方维护按钮，非过期 transient 不建议盲删。</p>
+                    <?php endif; ?>
+                    <?php if (!empty($autoload_optimizer_report['option_prefixes'])): ?>
+                        <h3>wp_options 前缀体积 TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>前缀</th><th>数量</th><th>体积</th></tr></thead><tbody><?php foreach ($autoload_optimizer_report['option_prefixes'] as $row): ?><tr><td><code><?php echo esc_html($row['prefix']); ?></code></td><td><?php echo esc_html(number_format_i18n($row['count'])); ?></td><td><?php echo esc_html($this->format_bytes($row['bytes'])); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
                     <?php if (!empty($autoload_optimizer_report['backups'])): ?>
                         <h3>autoload 回滚</h3>
                         <table class="wplco-table"><thead><tr><th>option_name</th><th>原状态</th><th>时间</th><th>操作</th></tr></thead><tbody>
@@ -1571,6 +1591,14 @@ final class WP_Large_Content_Optimizer {
                         <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>相对路径</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['physical_missing_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><code><?php echo esc_html($row['path']); ?></code></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
                         <p class="wplco-small">只抽查最近 40 个有文件路径的附件，避免全量遍历上传目录造成 IO 压力。</p>
                     <?php endif; ?>
+                    <?php if (!empty($media_report['large_file_samples'])): ?>
+                        <h3>最近附件大文件 TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>大小</th><th>相对路径</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['large_file_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><?php echo esc_html($this->format_bytes($row['bytes'])); ?></td><td><code><?php echo esc_html($row['path']); ?></code></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
+                    <?php if (!empty($media_report['missing_thumbnail_samples'])): ?>
+                        <h3>缺少缩略图 sizes 样本</h3>
+                        <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>相对路径</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['missing_thumbnail_samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><code><?php echo esc_html($row['path']); ?></code></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
+                    <?php endif; ?>
                     <?php if (!empty($media_report['samples'])): ?>
                         <h3>待审查附件样本</h3>
                         <table class="wplco-table"><thead><tr><th>ID</th><th>标题</th><th>问题</th><th>编辑</th></tr></thead><tbody><?php foreach ($media_report['samples'] as $row): ?><tr><td><code><?php echo esc_html($row['id']); ?></code></td><td><?php echo esc_html($row['title']); ?></td><td><span class="wplco-warn"><?php echo esc_html($row['issue']); ?></span></td><td><a href="<?php echo esc_url($row['edit_url']); ?>" target="_blank" rel="noopener">编辑</a></td></tr><?php endforeach; ?></tbody></table>
@@ -1583,9 +1611,15 @@ final class WP_Large_Content_Optimizer {
                         <div><strong>启用插件</strong><br><span class="wplco-metric"><?php echo esc_html(number_format_i18n($plugin_theme_report['active_plugins'])); ?></span></div>
                         <div><strong>可能影响缓存插件</strong><br><span class="wplco-metric <?php echo $plugin_theme_report['cache_plugins'] ? 'wplco-warn' : 'wplco-ok'; ?>"><?php echo esc_html(number_format_i18n($plugin_theme_report['cache_plugins'])); ?></span></div>
                         <div><strong>当前主题</strong><br><span><?php echo esc_html($plugin_theme_report['theme']); ?></span></div>
+                        <div><strong>主题目录体积</strong><br><span class="wplco-metric"><?php echo esc_html($this->format_bytes($plugin_theme_report['theme_size']['bytes'])); ?></span></div>
                     </div>
                     <?php if (!empty($plugin_theme_report['recommendations'])): ?><ul class="wplco-list"><?php foreach ($plugin_theme_report['recommendations'] as $rec): ?><li><?php echo esc_html($rec); ?></li><?php endforeach; ?></ul><?php endif; ?>
                     <table class="wplco-table"><thead><tr><th>插件</th><th>提示</th></tr></thead><tbody><?php foreach ($plugin_theme_report['notable_plugins'] as $row): ?><tr><td><code><?php echo esc_html($row['plugin']); ?></code></td><td><?php echo esc_html($row['hint']); ?></td></tr><?php endforeach; ?></tbody></table>
+                    <?php if (!empty($plugin_theme_report['active_plugin_details'])): ?>
+                        <h3>启用插件体积 TOP</h3>
+                        <table class="wplco-table"><thead><tr><th>插件</th><th>版本</th><th>目录体积</th><th>文件数</th><th>提示</th></tr></thead><tbody><?php foreach ($plugin_theme_report['active_plugin_details'] as $row): ?><tr><td><code><?php echo esc_html($row['name']); ?></code><br><span class="wplco-small"><?php echo esc_html($row['plugin']); ?></span></td><td><?php echo esc_html($row['version']); ?></td><td><span class="<?php echo esc_attr($row['class']); ?>"><?php echo esc_html($this->format_bytes($row['bytes'])); ?><?php echo $row['truncated'] ? ' +' : ''; ?></span></td><td><?php echo esc_html(number_format_i18n($row['files'])); ?></td><td><?php echo esc_html($row['hint']); ?></td></tr><?php endforeach; ?></tbody></table>
+                        <p class="wplco-small">插件目录体积为只读扫描，用于发现插件目录内异常日志、缓存、备份包或过多临时文件。</p>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -1786,10 +1820,10 @@ final class WP_Large_Content_Optimizer {
                 var queueNonce='<?php echo esc_js(wp_create_nonce('wplco_queue')); ?>';
                 var tabMap={
                     '性能诊断评分':'overview','数据库体检':'overview','分批清理':'overview','安全优化向导':'overview','缓存与环境检查':'overview',
-                    'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','推荐数据库索引':'database','核心数据表健康检查':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
+                    'Multisite 兼容检测':'overview','诊断页轻量 Profiling':'overview','数据表大小 TOP':'database','postmeta 热点字段 TOP':'database','autoload 体积 TOP':'database','postmeta 深度治理':'database','autoload 优化器':'database','Transient 深度概览':'database','wp_options 前缀体积 TOP':'database','推荐数据库索引':'database','核心数据表健康检查':'database','数据库慢查询风险分析':'database','慢查询 EXPLAIN 采样':'database',
                     '采集站专项体检':'collector','重复标题 TOP':'collector','重复文章处理工具':'collector','已发布重复文章审查器':'collector',
                     'WP-Cron 与采集任务检测':'cron','WooCommerce/Action Scheduler 检测':'cron',
-                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','插件/主题体检':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
+                    '前台性能与缓存检测':'frontend','页面缓存':'frontend','高级缓存就绪检查':'frontend','高级缓存 Drop-in 管理':'frontend','admin-ajax 诊断':'frontend','媒体库体检':'frontend','最近附件大文件 TOP':'frontend','缺少缩略图 sizes 样本':'frontend','插件/主题体检':'frontend','启用插件体积 TOP':'frontend','性能趋势记录':'logs','数据库维护日志':'logs','设置':'settings'
                 };
                 var cards=root.querySelectorAll(':scope > .wplco-card, :scope > .wplco-grid > .wplco-card, :scope > .wplco-two > .wplco-card');
                 var collapseByDefault=['推荐数据库索引','重复文章处理工具','已发布重复文章审查器','数据库慢查询风险分析','postmeta 深度治理','autoload 优化器','admin-ajax 诊断','媒体库体检','插件/主题体检','WooCommerce/Action Scheduler 检测','慢查询 EXPLAIN 采样'];
@@ -3403,6 +3437,8 @@ PHP;
             $mime_types[] = array('mime' => $row['mime'] !== '' ? $row['mime'] : '(empty)', 'count' => intval($row['total']));
         }
         $physical_missing_samples = array();
+        $large_file_samples = array();
+        $missing_thumbnail_samples = array();
         $upload_dir = wp_upload_dir();
         $base_dir = !empty($upload_dir['basedir']) ? trailingslashit($upload_dir['basedir']) : '';
         if ($base_dir !== '') {
@@ -3414,17 +3450,39 @@ PHP;
                 }
                 $full = $base_dir . $relative;
                 if (!file_exists($full)) {
-                    $physical_missing_samples[] = array(
+                    if (count($physical_missing_samples) < 8) {
+                        $physical_missing_samples[] = array(
+                            'id' => intval($row['ID']),
+                            'title' => $row['post_title'] !== '' ? $row['post_title'] : '(无标题)',
+                            'path' => $relative,
+                            'edit_url' => get_edit_post_link(intval($row['ID']), ''),
+                        );
+                    }
+                    continue;
+                }
+                $bytes = intval(filesize($full));
+                if ($bytes > 0) {
+                    $large_file_samples[] = array(
+                        'id' => intval($row['ID']),
+                        'title' => $row['post_title'] !== '' ? $row['post_title'] : '(无标题)',
+                        'path' => $relative,
+                        'bytes' => $bytes,
+                        'edit_url' => get_edit_post_link(intval($row['ID']), ''),
+                    );
+                }
+                $metadata = wp_get_attachment_metadata(intval($row['ID']));
+                if (is_array($metadata) && empty($metadata['sizes']) && preg_match('/\.(jpe?g|png|webp|gif)$/i', $relative)) {
+                    $missing_thumbnail_samples[] = array(
                         'id' => intval($row['ID']),
                         'title' => $row['post_title'] !== '' ? $row['post_title'] : '(无标题)',
                         'path' => $relative,
                         'edit_url' => get_edit_post_link(intval($row['ID']), ''),
                     );
-                    if (count($physical_missing_samples) >= 8) {
-                        break;
-                    }
                 }
             }
+            usort($large_file_samples, function($a, $b) { return $b['bytes'] <=> $a['bytes']; });
+            $large_file_samples = array_slice($large_file_samples, 0, 8);
+            $missing_thumbnail_samples = array_slice($missing_thumbnail_samples, 0, 8);
         }
         $samples = array();
         $rows = $wpdb->get_results($wpdb->prepare("SELECT p.ID, p.post_title, CASE WHEN filepm.meta_id IS NULL THEN %s WHEN metapm.meta_id IS NULL THEN %s WHEN p.post_parent=0 THEN %s ELSE %s END AS issue FROM {$wpdb->posts} p LEFT JOIN {$wpdb->postmeta} metapm ON metapm.post_id=p.ID AND metapm.meta_key=%s LEFT JOIN {$wpdb->postmeta} filepm ON filepm.post_id=p.ID AND filepm.meta_key=%s WHERE p.post_type=%s AND (p.post_parent=0 OR metapm.meta_id IS NULL OR filepm.meta_id IS NULL) ORDER BY p.ID DESC LIMIT 12", '缺少文件路径', '缺少元数据', '未挂载', '需审查', '_wp_attachment_metadata', '_wp_attached_file', 'attachment'), ARRAY_A);
@@ -3455,10 +3513,16 @@ PHP;
         if ($large_originals > 1000) {
             $recommendations[] = '较多附件元数据很大，可能由超多缩略图尺寸或图片处理插件造成；建议审查缩略图尺寸策略。';
         }
+        if (!empty($large_file_samples)) {
+            $recommendations[] = '最近附件样本中存在较大的原始文件，可考虑压缩、WebP/AVIF 或 CDN，但不要直接删除原图。';
+        }
+        if (!empty($missing_thumbnail_samples)) {
+            $recommendations[] = '最近图片样本中发现缺少缩略图 sizes 的附件，建议单个再生缩略图确认，不建议直接批量处理。';
+        }
         if (empty($recommendations)) {
             $recommendations[] = '媒体库基础状态正常。';
         }
-        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'missing_file' => $missing_file, 'large_originals' => $large_originals, 'mime_types' => $mime_types, 'physical_missing_samples' => $physical_missing_samples, 'samples' => $samples, 'recommendations' => $recommendations);
+        return array('attachments' => $attachments, 'unattached' => $unattached, 'missing_metadata' => $missing_metadata, 'missing_file' => $missing_file, 'large_originals' => $large_originals, 'mime_types' => $mime_types, 'physical_missing_samples' => $physical_missing_samples, 'large_file_samples' => $large_file_samples, 'missing_thumbnail_samples' => $missing_thumbnail_samples, 'samples' => $samples, 'recommendations' => $recommendations);
     }
 
     private function collect_advanced_cache_report() {
@@ -3491,19 +3555,74 @@ PHP;
         );
     }
 
+    private function directory_size_limited($path, $max_files = 2000) {
+        $bytes = 0;
+        $files = 0;
+        $truncated = false;
+        if (!is_dir($path) || !is_readable($path)) {
+            return array('bytes' => 0, 'files' => 0, 'truncated' => false);
+        }
+        try {
+            $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+            foreach ($iterator as $file) {
+                if (!$file->isFile()) {
+                    continue;
+                }
+                $files++;
+                $bytes += intval($file->getSize());
+                if ($files >= $max_files) {
+                    $truncated = true;
+                    break;
+                }
+            }
+        } catch (Exception $e) {
+            $truncated = true;
+        }
+        return array('bytes' => $bytes, 'files' => $files, 'truncated' => $truncated);
+    }
+
     private function collect_plugin_theme_report() {
+        if (!function_exists('get_plugins')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
         $active = (array) get_option('active_plugins', array());
+        $all_plugins = function_exists('get_plugins') ? get_plugins() : array();
         $cache_keywords = array('cache','rocket','litespeed','redis','w3-total','wp-super-cache','autoptimize','sg-cachepress','breeze','cloudflare');
         $notable = array();
+        $active_details = array();
+        $plugin_dir = trailingslashit(WP_PLUGIN_DIR);
         foreach ($active as $plugin) {
             $lower = strtolower($plugin);
+            $hints = array();
             foreach ($cache_keywords as $keyword) {
                 if (strpos($lower, $keyword) !== false) {
+                    $hints[] = '可能影响缓存/资源优化，请避免功能重复开启。';
                     $notable[] = array('plugin' => $plugin, 'hint' => '可能影响缓存/资源优化，请避免功能重复开启。');
                     break;
                 }
             }
+            $path_part = dirname($plugin);
+            $scan_path = $path_part === '.' ? $plugin_dir . $plugin : $plugin_dir . $path_part;
+            $size = $this->directory_size_limited($scan_path, 1600);
+            if ($size['bytes'] > 50 * 1024 * 1024) {
+                $hints[] = '插件目录体积较大，可能包含日志、缓存或备份文件，建议人工确认。';
+            }
+            if (!empty($size['truncated'])) {
+                $hints[] = '文件数较多，目录体积为抽样估算。';
+            }
+            $meta = isset($all_plugins[$plugin]) ? $all_plugins[$plugin] : array();
+            $active_details[] = array(
+                'plugin' => $plugin,
+                'name' => !empty($meta['Name']) ? $meta['Name'] : $plugin,
+                'version' => !empty($meta['Version']) ? $meta['Version'] : '-',
+                'bytes' => $size['bytes'],
+                'files' => $size['files'],
+                'truncated' => !empty($size['truncated']),
+                'hint' => !empty($hints) ? implode(' ', array_unique($hints)) : '未发现明显体积/缓存冲突提示。',
+                'class' => $size['bytes'] > 50 * 1024 * 1024 ? 'wplco-warn' : 'wplco-ok',
+            );
         }
+        usort($active_details, function($a, $b) { return $b['bytes'] <=> $a['bytes']; });
         $recommendations = array();
         if (count($active) > 40) {
             $recommendations[] = '启用插件超过 40 个，建议排查慢插件、重复功能插件和前台加载资源。';
@@ -3511,11 +3630,25 @@ PHP;
         if (!empty($notable)) {
             $recommendations[] = '检测到缓存/优化类插件，请避免与本插件页面缓存、前台瘦身功能重复。';
         }
+        foreach (array_slice($active_details, 0, 3) as $detail) {
+            if ($detail['bytes'] > 50 * 1024 * 1024) {
+                $recommendations[] = $detail['name'] . ' 插件目录体积较大，建议检查是否有日志、备份包或临时文件。';
+            }
+        }
         if (empty($recommendations)) {
-            $recommendations[] = '插件数量和缓存冲突风险暂未发现明显异常。';
+            $recommendations[] = '插件数量、缓存冲突和插件目录体积暂未发现明显异常。';
         }
         $theme = wp_get_theme();
-        return array('active_plugins' => count($active), 'cache_plugins' => count($notable), 'notable_plugins' => array_slice($notable, 0, 12), 'theme' => $theme->get('Name') . ' ' . $theme->get('Version'), 'recommendations' => $recommendations);
+        $theme_size = $this->directory_size_limited(get_stylesheet_directory(), 2000);
+        return array(
+            'active_plugins' => count($active),
+            'cache_plugins' => count($notable),
+            'notable_plugins' => array_slice($notable, 0, 12),
+            'active_plugin_details' => array_slice($active_details, 0, 12),
+            'theme' => $theme->get('Name') . ' ' . $theme->get('Version'),
+            'theme_size' => $theme_size,
+            'recommendations' => $recommendations,
+        );
     }
 
     private function collect_database_health_report() {
@@ -3971,11 +4104,30 @@ PHP;
             $class = $bytes > 1048576 ? 'wplco-danger' : ($bytes > 262144 ? 'wplco-warn' : 'wplco-ok');
             $candidates[] = array('option_name' => $name, 'autoload' => $row['autoload'], 'bytes' => $bytes, 'risk' => $risk, 'class' => $class, 'protected' => $is_protected);
         }
+        $transient_prefix = $wpdb->esc_like('_transient_') . '%';
+        $site_transient_prefix = $wpdb->esc_like('_site_transient_') . '%';
+        $timeout_prefix = $wpdb->esc_like('_transient_timeout_') . '%';
+        $site_timeout_prefix = $wpdb->esc_like('_site_transient_timeout_') . '%';
+        $transient_report = array(
+            'expired_timeouts' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE (option_name LIKE %s OR option_name LIKE %s) AND option_value < %d", $timeout_prefix, $site_timeout_prefix, time()))),
+            'timeout_rows' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $timeout_prefix, $site_timeout_prefix))),
+            'transient_rows' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $transient_prefix, $site_transient_prefix))),
+            'bytes' => intval($wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(LENGTH(option_value)),0) FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $transient_prefix, $site_transient_prefix))),
+        );
+        $prefix_rows = $wpdb->get_results("SELECT SUBSTRING_INDEX(option_name, '_', 2) AS prefix, COUNT(*) AS total, COALESCE(SUM(LENGTH(option_value)),0) AS bytes FROM {$wpdb->options} GROUP BY prefix ORDER BY bytes DESC LIMIT 12", ARRAY_A);
+        $option_prefixes = array();
+        foreach ((array) $prefix_rows as $row) {
+            $option_prefixes[] = array(
+                'prefix' => $row['prefix'] !== '' ? $row['prefix'] : '(empty)',
+                'count' => intval($row['total']),
+                'bytes' => intval($row['bytes']),
+            );
+        }
         $backups = get_option('wplco_autoload_backups', array());
         if (!is_array($backups)) {
             $backups = array();
         }
-        return array('total_bytes' => $total_bytes, 'total_class' => $total_bytes > 5 * 1024 * 1024 ? 'wplco-danger' : ($total_bytes > 1024 * 1024 ? 'wplco-warn' : 'wplco-ok'), 'candidates' => $candidates, 'backups' => $backups);
+        return array('total_bytes' => $total_bytes, 'total_class' => $total_bytes > 5 * 1024 * 1024 ? 'wplco-danger' : ($total_bytes > 1024 * 1024 ? 'wplco-warn' : 'wplco-ok'), 'candidates' => $candidates, 'transient_report' => $transient_report, 'option_prefixes' => $option_prefixes, 'backups' => $backups);
     }
 
     private function requested_option_name() {

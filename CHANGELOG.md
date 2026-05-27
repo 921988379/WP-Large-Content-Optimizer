@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.7.0 - 2026-05-27
+
+### Added
+
+- Autoload 优化器新增 Transient 深度概览，展示过期 timeout、timeout 行、transient 行和 transient 体积。
+- 新增 wp_options 前缀体积 TOP，帮助定位插件/主题写入的大量 option。
+- 媒体库新增最近附件大文件 TOP 和缺少缩略图 sizes 样本。
+- 插件/主题体检新增启用插件目录体积 TOP、文件数和当前主题目录体积。
+
+### Safety
+
+- 目录体积扫描只读统计，限制扫描文件数量，不删除、移动或改写插件/主题文件。
+- 媒体增强只读展示，不删除原图、不自动再生缩略图。
+- Transient 增强只读展示，非过期 transient 不自动清理。
+
 ## 3.6.0 - 2026-05-27
 
 ### Added

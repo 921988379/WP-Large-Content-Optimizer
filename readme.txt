@@ -4,7 +4,7 @@ Tags: performance, database, cleanup, optimization, large site, wordpress admin,
 Requires at least: 5.8
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 3.6.0
+Stable tag: 3.7.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Author: 一点优化
@@ -50,6 +50,9 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 * Cron Hook 来源/回调识别
 * 诊断页轻量 Profiling
 * 核心数据表健康检查
+* 启用插件目录体积 TOP
+* 媒体大文件 TOP 与缺少缩略图样本
+* Transient 深度概览与 wp_options 前缀体积 TOP
 * 媒体文件存在性抽样
 * Action Scheduler 失败/超时任务样本
 * Multisite 兼容检测
@@ -104,6 +107,10 @@ WP Large Content Optimizer 面向文章量较大的 WordPress 网站，特别是
 = 为什么报告会缓存？ =
 
 大站统计 postmeta 热点、表大小、慢查询风险可能比较重。插件默认缓存诊断报告 10 分钟，可手动刷新。
+
+= 3.7.0 的目录体积扫描会修改插件或主题文件吗？ =
+
+不会。插件/主题体积扫描只读统计启用插件目录和当前主题目录，用于发现日志、缓存、备份包或临时文件堆积；不会删除、移动或改写任何文件。
 
 = 3.6.0 会自动 OPTIMIZE 数据表或删除媒体文件吗？ =
 
