@@ -3,7 +3,7 @@
  * Plugin Name: WP Large Content Optimizer
  * Plugin URI: https://www.seoyh.net/
  * Description: 针对文章量大导致 WordPress 变慢的问题，提供数据库体检、垃圾数据分批清理、索引检测/添加、后台文章列表加速、轻量页面缓存和定时维护。
- * Version: 3.8.0
+ * Version: 3.8.1
  * Author: 一点优化
  * Author URI: https://www.seoyh.net/
  * Text Domain: wp-large-content-optimizer
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
 }
 
 final class WP_Large_Content_Optimizer {
-    const VERSION = '3.8.0';
+    const VERSION = '3.8.1';
     const OPTION = 'wplco_settings';
     const LOG_OPTION = 'wplco_maintenance_logs';
     const PAGE_CACHE_META_OPTION = 'wplco_page_cache_meta';
@@ -1024,15 +1024,6 @@ final class WP_Large_Content_Optimizer {
                     <?php $this->action_button('refresh_report', '刷新诊断报告', '刷新诊断报告会重新统计数据库，数据量很大时可能需要等待，确定继续？'); ?>
                     <?php $this->action_button('export_report', '导出 JSON 诊断报告', '导出当前诊断报告？'); ?>
                 </div>
-                <div class="wplco-nav" role="tablist" aria-label="大站优化模块">
-                    <button type="button" class="is-active" data-wplco-tab="overview">概览</button>
-                    <button type="button" data-wplco-tab="database">数据库</button>
-                    <button type="button" data-wplco-tab="collector">采集站</button>
-                    <button type="button" data-wplco-tab="cron">定时任务</button>
-                    <button type="button" data-wplco-tab="frontend">前台优化</button>
-                    <button type="button" data-wplco-tab="logs">日志</button>
-                    <button type="button" data-wplco-tab="settings">设置</button>
-                </div>
             </div>
 
             <?php if ($notice): ?>
@@ -1041,7 +1032,24 @@ final class WP_Large_Content_Optimizer {
 
             <style>
                 .wplco-wrap{--wplco-bg:#f6f7fb;--wplco-card:#fff;--wplco-border:#e3e7ef;--wplco-text:#1d2327;--wplco-muted:#667085;--wplco-primary:#2563eb;--wplco-primary-dark:#1d4ed8;--wplco-shadow:0 8px 24px rgba(15,23,42,.06);max-width:1480px}.wplco-wrap *{box-sizing:border-box}.wplco-hero{display:flex;justify-content:space-between;gap:22px;align-items:center;margin:18px 0 14px;padding:24px;border:1px solid #dbe5ff;border-radius:18px;background:linear-gradient(135deg,#eef4ff 0%,#fff 55%,#f8fbff 100%);box-shadow:var(--wplco-shadow)}.wplco-hero h1{margin:0 0 8px;font-size:26px;font-weight:700;color:#0f172a}.wplco-hero p{max-width:900px;margin:0 0 6px;color:#475467;font-size:14px}.wplco-hero-meta{font-size:12px!important;color:#667085!important}.wplco-hero-score{min-width:112px;text-align:center;border-radius:16px;background:#fff;border:1px solid var(--wplco-border);padding:14px 18px;box-shadow:0 4px 14px rgba(15,23,42,.05)}.wplco-hero-score span{display:block;font-size:38px;line-height:1;font-weight:800}.wplco-hero-score small{display:block;margin-top:5px;color:#667085}.wplco-toolbar{position:sticky;top:32px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 16px;padding:10px 12px;border:1px solid var(--wplco-border);border-radius:14px;background:rgba(255,255,255,.92);box-shadow:var(--wplco-shadow);backdrop-filter:blur(8px)}.wplco-toolbar-actions,.wplco-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.wplco-toolbar form,.wplco-actions form{display:inline-block;margin:0}.wplco-toolbar .button,.wplco-actions .button{border-radius:8px}.wplco-nav button{border:0;border-radius:999px;background:#eef2ff;color:#1e40af;padding:7px 13px;font-size:12px;cursor:pointer;font-weight:600}.wplco-nav button:hover{background:#dbeafe;color:#1d4ed8}.wplco-nav button.is-active{background:var(--wplco-primary);color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.24)}.wplco-tab-hidden{display:none!important}.wplco-empty-group{display:none!important}.wplco-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:16px}.wplco-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}.wplco-card{position:relative;background:var(--wplco-card);border:1px solid var(--wplco-border);border-radius:16px;padding:18px;box-shadow:var(--wplco-shadow);overflow:hidden}.wplco-card:hover{border-color:#cbd5e1}.wplco-card h2{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-18px -18px 14px;padding:15px 18px;border-bottom:1px solid #edf0f5;background:linear-gradient(180deg,#fff,#fafbff);font-size:16px}.wplco-card h3{color:#1f2937}.wplco-card-body{transition:opacity .16s ease}.wplco-card.is-collapsed .wplco-card-body{display:none}.wplco-toggle{margin-left:auto;border:1px solid #d0d7de;border-radius:8px;background:#fff;color:#475467;font-size:12px;padding:3px 8px;cursor:pointer}.wplco-toggle:hover{background:#f8fafc;color:#1d2327}.wplco-card.is-collapsed .wplco-toggle:after{content:' 展开'}.wplco-card:not(.is-collapsed) .wplco-toggle:after{content:' 收起'}.wplco-stat{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #eef1f5;padding:8px 0}.wplco-stat span{color:#475467}.wplco-stat strong{font-size:16px}.wplco-danger{color:#b42318}.wplco-ok{color:#067647}.wplco-warn{color:#b54708}.wplco-table{width:100%;border-collapse:separate;border-spacing:0;overflow:hidden}.wplco-table th,.wplco-table td{padding:9px 10px;border-bottom:1px solid #eef1f5;text-align:left;vertical-align:top}.wplco-table th{background:#f8fafc;color:#475467;font-weight:600}.wplco-table tr:hover td{background:#fbfdff}.wplco-table code{word-break:break-all}.wplco-small{color:#667085;font-size:12px}.wplco-settings label{display:block;margin:10px 0;padding:8px 10px;border-radius:10px;background:#fbfcff;border:1px solid #eef1f5}.wplco-settings h3{margin-top:18px;padding-top:8px;border-top:1px solid #edf0f5}.wplco-number{width:90px}.wplco-score{font-size:36px;font-weight:800;margin:6px 0}.wplco-pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#f1f5f9;color:#475467;margin-left:6px;font-size:12px}.wplco-list{margin-left:18px;list-style:disc}.wplco-list li{margin-bottom:6px}.wplco-priority{border-left:5px solid #d92d20}.wplco-priority.medium{border-left-color:#f79009}.wplco-priority.low{border-left-color:#12b76a}.wplco-step{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:11px 0;border-bottom:1px solid #eef1f5}.wplco-badge{display:inline-block;text-align:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.wplco-risk-low{background:#ecfdf3;color:#067647}.wplco-risk-medium{background:#fffaeb;color:#b54708}.wplco-risk-high{background:#fef3f2;color:#b42318}.wplco-env{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.wplco-env div{background:#fbfcff;border:1px solid #eef1f5;border-radius:12px;padding:10px}.wplco-metric{font-size:26px;font-weight:800;margin-top:4px}.wplco-actions .button{margin:4px 6px 4px 0}.wplco-queue{margin-top:14px;padding:14px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc}.wplco-queue-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:10px 0}.wplco-queue-options label{padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}.wplco-progress{height:14px;overflow:hidden;border-radius:999px;background:#e5e7eb;margin:10px 0}.wplco-progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#12b76a);transition:width .2s ease}.wplco-queue-log{max-height:160px;overflow:auto;background:#0f172a;color:#d1e7ff;border-radius:10px;padding:10px;font-family:monospace;font-size:12px;white-space:pre-wrap}.wplco-card .wplco-card{box-shadow:none;border-radius:12px}.wplco-card .wplco-card h3{margin-top:0}@media (max-width:782px){.wplco-hero,.wplco-toolbar{display:block}.wplco-hero-score{margin-top:14px}.wplco-toolbar{position:static}.wplco-nav{margin-top:10px}.wplco-grid,.wplco-two{grid-template-columns:1fr}.wplco-table{display:block;overflow-x:auto}.wplco-card h2{font-size:15px}.wplco-step{grid-template-columns:1fr}}
+                .wplco-wrap{max-width:1640px}.wplco-toolbar{position:relative;top:auto}.wplco-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}.wplco-sidebar{position:sticky;top:48px;z-index:15;border:1px solid var(--wplco-border);border-radius:18px;background:rgba(255,255,255,.94);box-shadow:var(--wplco-shadow);padding:14px}.wplco-sidebar-title{margin:2px 4px 12px;color:#475467;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.wplco-sidebar .wplco-nav{display:flex;flex-direction:column;gap:7px;align-items:stretch}.wplco-sidebar .wplco-nav button{width:100%;display:flex;align-items:center;justify-content:space-between;border-radius:12px;background:#fff;color:#344054;border:1px solid transparent;padding:11px 12px;text-align:left;font-size:13px}.wplco-sidebar .wplco-nav button:after{content:attr(data-wplco-count);min-width:22px;text-align:center;border-radius:999px;background:#eef2ff;color:#475467;font-size:11px;padding:2px 6px;margin-left:8px}.wplco-sidebar .wplco-nav button:hover{background:#f8fbff;border-color:#dbeafe;color:#1d4ed8}.wplco-sidebar .wplco-nav button.is-active{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border-color:#1d4ed8;box-shadow:0 8px 18px rgba(37,99,235,.22)}.wplco-sidebar .wplco-nav button.is-active:after{background:rgba(255,255,255,.22);color:#fff}.wplco-content{min-width:0}.wplco-section-title{display:none;margin:0 0 14px;padding:12px 16px;border:1px solid var(--wplco-border);border-radius:14px;background:#fff;box-shadow:var(--wplco-shadow);font-size:15px;font-weight:700;color:#1f2937}.wplco-section-title.is-visible{display:block}.wplco-grid:first-child{margin-top:0}@media (max-width:960px){.wplco-layout{grid-template-columns:1fr}.wplco-sidebar{position:static}.wplco-sidebar .wplco-nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}}@media (max-width:782px){.wplco-sidebar .wplco-nav{grid-template-columns:1fr 1fr}.wplco-sidebar .wplco-nav button{font-size:12px;padding:9px 10px}}
             </style>
+
+            <div class="wplco-layout">
+                <aside class="wplco-sidebar" aria-label="大站优化模块导航">
+                    <div class="wplco-sidebar-title">模块导航</div>
+                    <div class="wplco-nav" role="tablist" aria-label="大站优化模块">
+                        <button type="button" class="is-active" data-wplco-tab="overview">概览</button>
+                        <button type="button" data-wplco-tab="database">数据库治理</button>
+                        <button type="button" data-wplco-tab="collector">采集内容</button>
+                        <button type="button" data-wplco-tab="cron">Cron / 队列</button>
+                        <button type="button" data-wplco-tab="frontend">前台与缓存</button>
+                        <button type="button" data-wplco-tab="logs">趋势与日志</button>
+                        <button type="button" data-wplco-tab="settings">设置</button>
+                    </div>
+                </aside>
+                <main class="wplco-content">
+                    <div class="wplco-section-title" data-wplco-section-title></div>
 
             <div class="wplco-grid">
                 <div class="wplco-card wplco-priority <?php echo esc_attr($diagnosis['level_class']); ?>">
@@ -1839,6 +1847,9 @@ final class WP_Large_Content_Optimizer {
                     <?php submit_button('保存设置'); ?>
                 </form>
             </div>
+                </main>
+            </div>
+
             <script>
             (function(){
                 var root=document.querySelector('.wplco-wrap');
@@ -1883,6 +1894,14 @@ final class WP_Large_Content_Optimizer {
                         group.classList.toggle('wplco-empty-group',!visible);
                     });
                 }
+                var tabLabels={overview:'概览',database:'数据库治理',collector:'采集内容',cron:'Cron / 队列',frontend:'前台与缓存',logs:'趋势与日志',settings:'设置'};
+                function updateTabCounts(){
+                    root.querySelectorAll('[data-wplco-tab]').forEach(function(btn){
+                        var tab=btn.getAttribute('data-wplco-tab');
+                        var count=root.querySelectorAll('[data-wplco-panel="'+tab+'"]').length;
+                        btn.setAttribute('data-wplco-count',count||'');
+                    });
+                }
                 function setTab(tab){
                     root.querySelectorAll('[data-wplco-panel]').forEach(function(card){
                         card.classList.toggle('wplco-tab-hidden',card.getAttribute('data-wplco-panel')!==tab);
@@ -1891,6 +1910,8 @@ final class WP_Large_Content_Optimizer {
                         btn.classList.toggle('is-active',btn.getAttribute('data-wplco-tab')===tab);
                         btn.setAttribute('aria-selected',btn.getAttribute('data-wplco-tab')===tab?'true':'false');
                     });
+                    var sectionTitle=root.querySelector('[data-wplco-section-title]');
+                    if(sectionTitle){sectionTitle.textContent=tabLabels[tab]||'模块';sectionTitle.classList.add('is-visible');}
                     updateGroupVisibility();
                     try{window.localStorage.setItem('wplco_active_tab',tab);}catch(e){}
                 }
@@ -1952,6 +1973,7 @@ final class WP_Large_Content_Optimizer {
                     });
                 }
 
+                updateTabCounts();
                 root.querySelectorAll('[data-wplco-tab]').forEach(function(btn){
                     btn.addEventListener('click',function(){setTab(btn.getAttribute('data-wplco-tab'));});
                 });
